@@ -1,8 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr
-from pydantic import validator
+from pydantic import BaseModel, ConfigDict, EmailStr, validator
 
 from app.core.security import MAX_PASSWORD_BYTES
 from app.models import RoleEnum
@@ -41,6 +40,8 @@ class UserUpdate(BaseModel):
 
 
 class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     email: EmailStr
     name: str
@@ -49,6 +50,3 @@ class UserOut(BaseModel):
     organization_id: str
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        orm_mode = True
