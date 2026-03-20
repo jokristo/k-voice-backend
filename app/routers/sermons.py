@@ -133,8 +133,9 @@ def _run_transcription_job(sermon_id: str):
         output.transcript = result.get("transcript")
         output.transcript_words = result.get("transcript_words")
         output.word_count = result.get("word_count")
+        output.processing_time = result.get("processing_time")
         output.estimated_read_time = nlp_service.estimate_read_time(output.word_count or 0)
-        output.ai_model = output.ai_model or "whisper-v3"
+        output.ai_model = settings.default_ai_model
 
         sermon.transcribed_at = datetime.utcnow()
         sermon.status = SermonStatus.processing

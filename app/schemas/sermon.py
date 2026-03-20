@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.models import SermonStatus
 
@@ -30,8 +30,7 @@ class SermonOutputOut(SermonOutputBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SermonBase(BaseModel):
@@ -75,5 +74,4 @@ class SermonOut(SermonBase):
     processed_at: Optional[datetime] = None
     output: Optional[SermonOutputOut] = None
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)

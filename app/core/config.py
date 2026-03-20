@@ -1,7 +1,8 @@
 from functools import lru_cache
 from typing import List
 
-from pydantic import AnyHttpUrl, BaseSettings, Field
+from pydantic import AnyHttpUrl, Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -17,7 +18,8 @@ class Settings(BaseSettings):
     storage_local_path: str = "storage"
     max_upload_size_mb: int = 50
     rate_limit_enabled: bool = False
-    default_ai_model: str = "whisper-v3"
+    default_ai_model: str = "gemini-2.0-flash"
+    gemini_api_key: str = ""
 
     class Config:
         env_file = ".env"
