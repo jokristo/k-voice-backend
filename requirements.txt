@@ -11,3 +11,5 @@ python-multipart
 aiofiles
 python-dotenv
 google-generativeai
+openai>=1.0.0
+faster-whisper>=1.0.0

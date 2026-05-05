@@ -1,4 +1,4 @@
-import os
+import logging
 from pathlib import Path
 from typing import Optional, Tuple
 from uuid import uuid4
@@ -7,6 +7,8 @@ import aiofiles
 from fastapi import UploadFile
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class StorageService:
@@ -29,7 +31,14 @@ class StorageService:
 
         size = destination.stat().st_size
         relative_path = destination.relative_to(self.base_path)
-        return relative_path.as_posix(), size
+        rel = relative_path.as_posix()
+        logger.info(
+            "storage save_upload subdir=%r relative=%s size_bytes=%s",
+            subdir,
+            rel,
+            size,
+        )
+        return rel, size
 
     def get_file_path(self, relative_path: str) -> Path:
         return self.base_path / Path(relative_path)
