@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
@@ -10,12 +12,14 @@ from app.schemas import LoginRequest, LoginResponse, TokenPayload, UserCreate, U
 from pydantic import BaseModel
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/register", response_model=UserOut)
 def register(user_in: UserCreate, db: Session = Depends(get_db)):
     existing = db.query(User).filter(User.email == user_in.email).first()
     if existing:
+        logger.warning("register rejected: email already exists %r", user_in.email)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
     try:
         password_hash = security.get_password_hash(user_in.password)
@@ -32,6 +36,7 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
+    logger.info("register ok user_id=%s email=%r", user.id, user.email)
     return user
 
 
@@ -39,16 +44,19 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
 def login(credentials: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == credentials.email).first()
     if not user:
+        logger.warning("login failed email=%r (unknown user)", credentials.email)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
     try:
         password_valid = security.verify_password(credentials.password, user.password_hash)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     if not password_valid:
+        logger.warning("login failed email=%r (bad password)", credentials.email)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
 
     access_token = security.create_access_token(user.id)
     refresh_token = security.create_refresh_token(user.id)
+    logger.info("login ok user_id=%s email=%r", user.id, user.email)
     return LoginResponse(access_token=access_token, refresh_token=refresh_token, user=user)
 
 
@@ -67,11 +75,14 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
         if token_data.sub is None or token_data.type != "refresh":
             raise credentials_exception
     except JWTError:
+        logger.warning("refresh failed: JWT decode error")
         raise credentials_exception
 
     user = db.query(User).filter(User.id == token_data.sub).first()
     if not user:
+        logger.warning("refresh failed: user not found sub=%s", token_data.sub)
         raise credentials_exception
     access_token = security.create_access_token(user.id)
     new_refresh = security.create_refresh_token(user.id)
+    logger.info("refresh ok user_id=%s", user.id)
     return {"access_token": access_token, "refresh_token": new_refresh, "token_type": "bearer"}
