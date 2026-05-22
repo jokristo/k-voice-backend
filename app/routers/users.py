@@ -29,10 +29,14 @@ def create_user(user_in: UserCreate, db: Session = Depends(get_db), _: User = De
     existing = db.query(User).filter(User.email == user_in.email).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+    try:
+        password_hash = security.get_password_hash(user_in.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     user = User(
         email=user_in.email,
         name=user_in.name,
-        password_hash=security.get_password_hash(user_in.password),
+        password_hash=password_hash,
         role=user_in.role,
         avatar=user_in.avatar,
         organization_id=user_in.organization_id,
@@ -68,7 +72,10 @@ def update_user(
     for field, value in user_in.dict(exclude_unset=True, exclude={"password"}).items():
         setattr(user, field, value)
     if user_in.password:
-        user.password_hash = security.get_password_hash(user_in.password)
+        try:
+            user.password_hash = security.get_password_hash(user_in.password)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     db.commit()
     db.refresh(user)
     return user

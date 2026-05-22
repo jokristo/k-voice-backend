@@ -69,3 +69,7 @@ app.include_router(users.router, prefix="/users", tags=["users"])
 app.include_router(sermons.router, prefix="/sermons", tags=["sermons"])
 app.include_router(ai.router, prefix="/ai", tags=["ai"])
 app.include_router(files.router, tags=["files"])
+
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the Sermon Management API"}
