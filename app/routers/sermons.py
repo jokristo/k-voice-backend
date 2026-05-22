@@ -230,8 +230,18 @@ def _run_transcription_job(sermon_id: str):
             db.commit()
             return
 
+        db.refresh(sermon)
+        if sermon.status == SermonStatus.pending:
+            logger.info("transcription job ABORT sermon_id=%s reason=cancelled", sermon_id)
+            return
+
         logger.info("transcription job RUN sermon_id=%s file=%s provider=%s", sermon_id, file_path, settings.transcription_provider)
         result = ai_service.transcribe_audio(file_path)
+
+        db.refresh(sermon)
+        if sermon.status == SermonStatus.pending:
+            logger.info("transcription job ABORT sermon_id=%s reason=cancelled_after_ai", sermon_id)
+            return
         transcript_preview = (result.get("transcript") or "")[:120]
         logger.info(
             "transcription job AI_OK sermon_id=%s word_count=%s preview=%r",
@@ -305,3 +315,51 @@ def transcribe_sermon(
     db.commit()
     background_tasks.add_task(_run_transcription_job, sermon_id)
     return {"message": "Transcription started", "status": sermon.status}
+
+
+def _assert_sermon_access(sermon: Sermon, current_user: User) -> None:
+    if current_user.role != RoleEnum.admin and sermon.organization_id != current_user.organization_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
+@router.post("/{sermon_id}/cancel")
+def cancel_sermon_processing(
+    sermon_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([RoleEnum.admin, RoleEnum.editor])),
+):
+    sermon = db.query(Sermon).filter(Sermon.id == sermon_id).first()
+    if not sermon:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sermon not found")
+    _assert_sermon_access(sermon, current_user)
+    if sermon.status not in (SermonStatus.transcribing, SermonStatus.processing):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only in-progress transcriptions can be cancelled",
+        )
+    sermon.status = SermonStatus.pending
+    db.commit()
+    db.refresh(sermon)
+    logger.info("sermon cancel sermon_id=%s new_status=%s", sermon_id, sermon.status)
+    return {"message": "Transcription cancelled", "status": sermon.status}
+
+
+@router.delete("/{sermon_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_sermon(
+    sermon_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([RoleEnum.admin, RoleEnum.editor])),
+):
+    sermon = db.query(Sermon).filter(Sermon.id == sermon_id).first()
+    if not sermon:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sermon not found")
+    _assert_sermon_access(sermon, current_user)
+    if sermon.audio_url:
+        relative = sermon.audio_url.replace("/files/", "")
+        try:
+            storage_service.get_file_path(relative).unlink(missing_ok=True)
+        except OSError:
+            logger.warning("delete sermon_id=%s could not unlink audio %s", sermon_id, relative)
+    db.delete(sermon)
+    db.commit()
+    logger.info("sermon deleted sermon_id=%s", sermon_id)
