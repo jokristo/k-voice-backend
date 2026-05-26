@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     # ex. whisper-1 (voir doc OpenAI Speech-to-Text)
     openai_transcription_model: str = "whisper-1"
+    # Résumé / NLP via Chat Completions (même OPENAI_API_KEY)
+    openai_summary_model: str = "gpt-4o-mini"
+    # openai | stub (stub = découpage naïf si pas de clé ou nlp_provider=stub)
+    nlp_provider: Literal["openai", "stub"] = "openai"
+    openai_nlp_max_transcript_chars: int = 100_000
+    openai_nlp_normalize_max_tokens: int = 4096
+    openai_nlp_summarize_max_tokens: int = 2048
+    openai_whisper_language: str = "fr"
     # --- Transcription locale (faster-whisper) : voir TRANSCRIPTION_PROVIDER=local
     # tiny, base, small, medium, large-v2, large-v3, etc.
     local_whisper_model_size: str = "base"
@@ -47,6 +55,13 @@ class Settings(BaseSettings):
     @field_validator("transcription_provider", mode="before")
     @classmethod
     def _normalize_transcription_provider(cls, v: object) -> object:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
+
+    @field_validator("nlp_provider", mode="before")
+    @classmethod
+    def _normalize_nlp_provider(cls, v: object) -> object:
         if isinstance(v, str):
             return v.strip().lower()
         return v

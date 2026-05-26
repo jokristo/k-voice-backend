@@ -3,6 +3,7 @@ from app.schemas.organization import OrganizationBase, OrganizationCreate, Organ
 from app.schemas.sermon import (
     SermonBase,
     SermonCreate,
+    SermonCreateIn,
     SermonOut,
     SermonOutputBase,
     SermonOutputCreate,
@@ -22,6 +23,7 @@ __all__ = [
     "OrganizationUpdate",
     "SermonBase",
     "SermonCreate",
+    "SermonCreateIn",
     "SermonOut",
     "SermonOutputBase",
     "SermonOutputCreate",

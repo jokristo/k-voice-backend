@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core import security
 from app.core.config import settings
 from app.core.database import get_db
+from app.deps.auth import get_current_user
 from app.models import User
 from app.schemas import LoginRequest, LoginResponse, TokenPayload, UserCreate, UserOut
 from pydantic import BaseModel
@@ -58,6 +59,11 @@ def login(credentials: LoginRequest, db: Session = Depends(get_db)):
     refresh_token = security.create_refresh_token(user.id)
     logger.info("login ok user_id=%s email=%r", user.id, user.email)
     return LoginResponse(access_token=access_token, refresh_token=refresh_token, user=user)
+
+
+@router.get("/me", response_model=UserOut)
+def me(current_user: User = Depends(get_current_user)):
+    return current_user
 
 
 class RefreshRequest(BaseModel):

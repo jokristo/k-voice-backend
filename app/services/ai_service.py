@@ -201,11 +201,16 @@ def _transcribe_openai(file_path: Path) -> Dict[str, Any]:
 
     start = time.time()
     client = OpenAI(api_key=settings.openai_api_key)
+    from app.services import nlp_service
+
+    whisper_prompt = nlp_service.whisper_prompt_hint()
     try:
         with open(file_path, "rb") as audio_f:
             tr = client.audio.transcriptions.create(
                 model=settings.openai_transcription_model,
                 file=(file_path.name, audio_f, _mime_for_path(file_path)),
+                language=settings.openai_whisper_language or "fr",
+                prompt=whisper_prompt,
             )
     except RateLimitError as e:
         logger.warning("OpenAI transcription rate limit: %s", str(e)[:300])
