@@ -149,9 +149,14 @@ python scripts/bootstrap_super_admin.py
 
 ## 6. Dépannage PostgreSQL
 
+### `could not translate host name "dpg-xxxxx-a"`
+
+L’API et la base ne sont pas sur le même réseau privé Render (souvent **régions différentes**). Voir **`POSTGRES_PROD.md`** (section dédiée). Correctif rapide : **External Database URL** dans `DATABASE_URL`, ou `region: frankfurt` sur la base **et** l’API dans `render.yaml`.
+
 | Problème | Solution |
 |----------|----------|
+| `could not translate host name "dpg-*-a"` | Même région API + Postgres, ou URL externe complète |
 | `No module named 'psycopg2'` | Redéployer après mise à jour `requirements.txt` (rebuild Docker) |
 | Erreur enum `super_admin` | `alembic upgrade head` (migration `0003` ajoute la valeur sur PostgreSQL) |
-| Connexion refusée | Utiliser l’**Internal** Database URL sur le service API (même région) |
+| Connexion refusée | Internal URL + même région, ou External URL + SSL |
 | `postgres://` vs `postgresql://` | Géré automatiquement dans `app/core/config.py` |

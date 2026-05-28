@@ -4,6 +4,7 @@
 databases:
   - name: kvoice-db
     plan: basic-256mb
+    region: frankfurt # OBLIGATOIRE : même région que kvoice-api (sinon host dpg-*-a introuvable)
     databaseName: kvoice
     user: kvoice
 

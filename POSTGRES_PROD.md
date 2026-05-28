@@ -114,6 +114,18 @@ uvicorn main:app --reload
 
 ---
 
+## Erreur : `could not translate host name "dpg-xxxxx-a"`
+
+**Cause :** l’URL interne Render (`@dpg-xxxxx-a/`) ne fonctionne que si l’API et PostgreSQL sont dans **la même région**. Souvent l’API est en **Frankfurt** et la base en **Oregon** (défaut Render).
+
+**Solutions :**
+
+1. **Aligner les régions** — `render.yaml` : `region: frankfurt` sur **kvoice-db** et **kvoice-api**. Si la base existante est ailleurs, créer une nouvelle base en Frankfurt et relier `DATABASE_URL`.
+2. **URL externe** — Postgres → **Connect** → **External Database URL** → coller dans `DATABASE_URL` sur `kvoice-api` → redeploy.
+3. **Liaison** — Postgres → **Connections** → `kvoice-api` doit être connecté.
+
+---
+
 ## Références techniques
 
 - Normalisation URL : `app/core/config.py` (`postgres://` → `postgresql://`)
