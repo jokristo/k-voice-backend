@@ -14,6 +14,7 @@ from app.schemas import SermonCreateIn, SermonOut, SermonUpdate
 from app.core.config import settings
 from app.services import ai_service, media_service, nlp_service, storage_service
 from app.services.ai_service import TranscriptionError
+from app.services.media_service import MediaProcessingError, compress_audio_for_storage
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -188,12 +189,31 @@ async def upload_sermon_audio(
             detail=f"File too large (>{settings.max_upload_size_mb}MB)",
         )
 
-    duration = media_service.get_audio_duration_seconds(storage_service.get_file_path(relative_path))
+    stored_path = storage_service.get_file_path(relative_path)
+    try:
+        compressed_path, was_compressed = compress_audio_for_storage(stored_path)
+        if was_compressed:
+            relative_path = compressed_path.relative_to(storage_service.base_path).as_posix()
+            size = compressed_path.stat().st_size
+            effective_mime = "audio/mpeg"
+            stored_path = compressed_path
+            logger.info(
+                "upload compressed sermon_id=%s new_relative=%s size=%s",
+                sermon_id,
+                relative_path,
+                size,
+            )
+    except MediaProcessingError as e:
+        stored_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=e.message) from e
+
+    duration = media_service.get_audio_duration_seconds(stored_path)
 
     sermon.audio_url = storage_service.get_public_url(relative_path)
     sermon.audio_size = size
     sermon.audio_format = effective_mime
     sermon.audio_duration = duration
+    sermon.audio_uploaded_at = datetime.utcnow()
     db.commit()
     db.refresh(sermon)
     logger.info(
@@ -318,7 +338,17 @@ def transcribe_sermon(
             sermon.audio_url,
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Audio not uploaded")
+    file_path = ai_service.get_audio_path_from_sermon(storage_service.base_path, sermon)
+    if not file_path or not file_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Fichier audio introuvable (peut-être supprimé après la période de rétention). Réimportez l'audio.",
+        )
     assert_org_access(current_user, sermon.organization_id)
+    if sermon.status in (SermonStatus.transcribing, SermonStatus.processing):
+        return {"message": "Already in progress", "status": sermon.status}
+    if sermon.status in (SermonStatus.failed, SermonStatus.pending):
+        logger.info("transcribe retry sermon_id=%s previous_status=%s", sermon_id, sermon.status)
     logger.info(
         "transcribe queued sermon_id=%s audio_url=%s current_status=%s",
         sermon_id,

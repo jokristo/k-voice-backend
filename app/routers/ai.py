@@ -19,6 +19,15 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _store_nlp_failure(sermon: Sermon, message: str, db: Session) -> None:
+    sermon.status = SermonStatus.failed
+    if sermon.output:
+        meta = dict(sermon.output.nlp_metadata) if isinstance(sermon.output.nlp_metadata, dict) else {}
+        meta["last_error"] = message[:500]
+        sermon.output.nlp_metadata = meta
+    db.commit()
+
+
 @router.post("/transcribe")
 async def transcribe_endpoint(
     sermon_id: Optional[str] = None,
@@ -107,9 +116,14 @@ def _process_sermon_job(sermon_id: str):
             logger.info("nlp process job ABORT sermon_id=%s reason=cancelled_after_nlp", sermon_id)
             return
         output = sermon.output or SermonOutput(sermon_id=sermon.id)
+        meta = dict(output.nlp_metadata) if isinstance(output.nlp_metadata, dict) else {}
+        meta.pop("last_error", None)
+        output.nlp_metadata = meta
         for field, value in result.items():
             if field == "nlp_metadata":
-                output.nlp_metadata = value
+                merged = {**meta, **(value or {})}
+                merged.pop("last_error", None)
+                output.nlp_metadata = merged
             else:
                 setattr(output, field, value)
         output.processing_time = int((time.time() - start) * 1000)
@@ -128,14 +142,12 @@ def _process_sermon_job(sermon_id: str):
         logger.warning("nlp process job FAIL sermon_id=%s NLPProcessingError: %s", sermon_id, e.message)
         sermon = db.query(Sermon).filter(Sermon.id == sermon_id).first()
         if sermon:
-            sermon.status = SermonStatus.failed
-            db.commit()
-    except Exception:
+            _store_nlp_failure(sermon, e.message, db)
+    except Exception as e:
         logger.exception("nlp process job FAIL sermon_id=%s", sermon_id)
         sermon = db.query(Sermon).filter(Sermon.id == sermon_id).first()
         if sermon:
-            sermon.status = SermonStatus.failed
-            db.commit()
+            _store_nlp_failure(sermon, str(e), db)
     finally:
         db.close()
 
@@ -167,6 +179,12 @@ def process_sermon(
     if sermon.status == SermonStatus.completed:
         logger.info("POST /ai/process skip sermon_id=%s already completed", sermon_id)
         return {"message": "Already completed", "status": sermon.status}
+    if sermon.status == SermonStatus.failed:
+        logger.info(
+            "POST /ai/process retry after failure sermon_id=%s transcript_len=%s",
+            sermon_id,
+            len(sermon.output.transcript),
+        )
     if sermon.status == SermonStatus.processing:
         logger.info("POST /ai/process skip sermon_id=%s already processing", sermon_id)
         return {"message": "Already processing", "status": sermon.status}

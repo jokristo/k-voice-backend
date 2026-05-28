@@ -189,7 +189,22 @@ def _as_str_list(value: Any, field: str) -> List[str]:
 
 
 def _normalize_transcript(raw: str) -> Dict[str, Any]:
-    text = _truncate(raw.strip())
+    text = raw.strip()
+    if len(text) > settings.openai_nlp_skip_full_normalize_chars:
+        logger.warning(
+            "nlp normalize skipped (transcript too long) len=%s threshold=%s",
+            len(text),
+            settings.openai_nlp_skip_full_normalize_chars,
+        )
+        return {
+            "corrected_transcript": "",
+            "corrections": [],
+            "confidence": "medium",
+            "normalize_skipped": True,
+            "normalize_skip_reason": "transcript_too_long",
+        }
+
+    text = _truncate(text)
     data = _openai_json_call(
         NORMALIZE_SYSTEM_PROMPT,
         f"Schéma JSON :\n{NORMALIZE_JSON_HINT}\n\nTranscription ASR :\n\n{text}",
@@ -222,6 +237,7 @@ def _normalize_transcript(raw: str) -> Dict[str, Any]:
         "corrected_transcript": corrected or raw,
         "corrections": corrections,
         "confidence": confidence,
+        "normalize_skipped": False,
     }
 
 
@@ -252,20 +268,22 @@ def _summarize_corrected(corrected: str) -> Dict[str, Any]:
 def _process_openai_two_step(transcript: str, transcription_model: str) -> Dict:
     # Étape 1 — normalisation
     normalized = _normalize_transcript(transcript)
-    corrected = normalized["corrected_transcript"]
+    corrected = normalized["corrected_transcript"] or transcript
+    summarize_source = corrected if corrected.strip() else transcript
 
-    # Étape 2 — résumé sur texte corrigé
-    summary_data = _summarize_corrected(corrected)
+    # Étape 2 — résumé (texte corrigé ou brut si normalisation sautée)
+    summary_data = _summarize_corrected(summarize_source)
 
-    word_count = len(corrected.split())
+    word_count = len(transcript.split())
     label = nlp_model_label(transcription_model)
 
     nlp_metadata = {
         "central_message": summary_data["central_message"],
-        "corrected_transcript": corrected,
+        "corrected_transcript": corrected if corrected.strip() else None,
         "corrections": normalized["corrections"],
         "confidence": normalized["confidence"],
         "pipeline": "2-step",
+        "normalize_skipped": normalized.get("normalize_skipped", False),
     }
 
     logger.info(

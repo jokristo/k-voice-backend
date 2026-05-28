@@ -84,6 +84,7 @@ class Sermon(Base):
     audio_size = Column(Integer)
     audio_duration = Column(Integer)
     audio_format = Column(String)
+    audio_uploaded_at = Column(DateTime, nullable=True)
     status = Column(SqlEnum(SermonStatus), default=SermonStatus.pending, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

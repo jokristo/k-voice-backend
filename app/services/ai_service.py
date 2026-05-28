@@ -13,8 +13,12 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI, 
 
 from app.core.config import settings
 from app.models import Sermon
+from app.services.media_service import MediaProcessingError, prepare_whisper_audio_paths
 
 logger = logging.getLogger(__name__)
+
+_openai_client: OpenAI | None = None
+_openai_client_lock = threading.Lock()
 
 _whisper_model_lock = threading.Lock()
 _whisper_model: Any = None
@@ -192,6 +196,19 @@ def _transcribe_gemini(file_path: Path) -> Dict[str, Any]:
     return _build_result(transcript, start)
 
 
+def _get_openai_client() -> OpenAI:
+    global _openai_client
+    with _openai_client_lock:
+        if _openai_client is None:
+            timeout_s = max(60.0, float(settings.openai_transcription_timeout_s))
+            _openai_client = OpenAI(
+                api_key=settings.openai_api_key,
+                timeout=timeout_s,
+                max_retries=max(0, settings.openai_transcription_max_retries),
+            )
+        return _openai_client
+
+
 def _transcribe_openai(file_path: Path) -> Dict[str, Any]:
     if not settings.openai_api_key or not settings.openai_api_key.strip():
         raise TranscriptionError(
@@ -200,10 +217,18 @@ def _transcribe_openai(file_path: Path) -> Dict[str, Any]:
         )
 
     start = time.time()
-    client = OpenAI(api_key=settings.openai_api_key)
+    client = _get_openai_client()
     from app.services import nlp_service
 
     whisper_prompt = nlp_service.whisper_prompt_hint()
+    size_mb = file_path.stat().st_size / (1024 * 1024)
+    logger.info(
+        "openai whisper request file=%s size_mb=%.1f timeout_s=%s max_retries=%s",
+        file_path.name,
+        size_mb,
+        settings.openai_transcription_timeout_s,
+        settings.openai_transcription_max_retries,
+    )
     try:
         with open(file_path, "rb") as audio_f:
             tr = client.audio.transcriptions.create(
@@ -326,7 +351,37 @@ def transcribe_audio(file_path: Path) -> Dict[str, Any]:
     )
 
     if settings.transcription_provider == "openai":
-        return _transcribe_openai(file_path)
+        try:
+            paths = prepare_whisper_audio_paths(file_path)
+        except MediaProcessingError as e:
+            raise TranscriptionError(e.message) from e
+
+        if len(paths) == 1:
+            return _transcribe_openai(paths[0])
+
+        start = time.time()
+        transcripts: list[str] = []
+        for index, chunk_path in enumerate(paths, start=1):
+            logger.info(
+                "transcribe_openai chunk %s/%s file=%s size_mb=%.1f",
+                index,
+                len(paths),
+                chunk_path.name,
+                chunk_path.stat().st_size / (1024 * 1024),
+            )
+            chunk_result = _transcribe_openai(chunk_path)
+            text = (chunk_result.get("transcript") or "").strip()
+            if text:
+                transcripts.append(text)
+
+        merged = "\n\n".join(transcripts)
+        logger.info(
+            "transcribe_openai merged chunks=%s transcript_len=%s",
+            len(paths),
+            len(merged),
+        )
+        return _build_result(merged, start)
+
     if settings.transcription_provider == "local":
         return _transcribe_local(file_path)
     return _transcribe_gemini(file_path)

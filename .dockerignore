@@ -1,0 +1,16 @@
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.git
+.gitignore
+*.db
+storage
+.env
+.env.*
+!.env.example
+dev.log
+*.md
+!DEPLOY_RENDER.md

@@ -43,6 +43,7 @@ class SermonBase(BaseModel):
     audio_size: Optional[int] = None
     audio_duration: Optional[int] = None
     audio_format: Optional[str] = None
+    audio_uploaded_at: Optional[datetime] = None
     status: SermonStatus = SermonStatus.pending
 
 
