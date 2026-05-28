@@ -1,3 +1,4 @@
+# Paquets Python (pip). ffmpeg/ffprobe : installés via Dockerfile ou apt sur le serveur.
 fastapi
 uvicorn[standard]
 sqlalchemy

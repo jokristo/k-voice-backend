@@ -1,0 +1,60 @@
+# Render Blueprint — K-Voice API (déployer depuis le dossier k-voice-backend)
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: kvoice-api
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    healthCheckPath: /health
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    disk:
+      name: kvoice-data
+      mountPath: /data
+      sizeGB: 10
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: DATABASE_URL
+        value: sqlite:////data/kvoice.db
+      - key: STORAGE_LOCAL_PATH
+        value: /data/storage
+      - key: SECRET_KEY
+        generateValue: true
+      - key: TRANSCRIPTION_PROVIDER
+        value: openai
+      - key: NLP_PROVIDER
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_SUMMARY_MODEL
+        value: gpt-4o-mini
+      - key: OPENAI_TRANSCRIPTION_MODEL
+        value: whisper-1
+      - key: MAX_UPLOAD_SIZE_MB
+        value: "100"
+      - key: AUDIO_COMPRESSION_ENABLED
+        value: "true"
+      - key: AUDIO_COMPRESSION_TARGET_MB
+        value: "24"
+      - key: AUDIO_COMPRESSION_MIN_KBPS
+        value: "64"
+      - key: AUDIO_COMPRESSION_MAX_KBPS
+        value: "128"
+      - key: CORS_ORIGINS
+        sync: false
+      - key: RUN_BOOTSTRAP
+        value: "true"
+      - key: SUPER_ADMIN_EMAIL
+        sync: false
+      - key: SUPER_ADMIN_PASSWORD
+        sync: false
+
+# Option PostgreSQL (décommenter et remplacer DATABASE_URL sur le service web) :
+# databases:
+#   - name: kvoice-db
+#     plan: free
+#     databaseName: kvoice
+#     user: kvoice

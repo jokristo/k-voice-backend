@@ -20,6 +20,7 @@ from app.core.database import Base
 
 
 class RoleEnum(str, Enum):
+    super_admin = "super_admin"
     admin = "admin"
     editor = "editor"
     member = "member"
@@ -83,6 +84,7 @@ class Sermon(Base):
     audio_size = Column(Integer)
     audio_duration = Column(Integer)
     audio_format = Column(String)
+    audio_uploaded_at = Column(DateTime, nullable=True)
     status = Column(SqlEnum(SermonStatus), default=SermonStatus.pending, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -112,6 +114,7 @@ class SermonOutput(Base):
     estimated_read_time = Column(Integer)
     processing_time = Column(Integer)
     ai_model = Column(String, default="whisper-v3")
+    nlp_metadata = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

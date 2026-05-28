@@ -9,12 +9,23 @@ from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal, get_db
 from app.deps.auth import get_current_user, require_role
+from app.deps.scopes import assert_org_access
 from app.models import RoleEnum, Sermon, SermonOutput, SermonStatus, User
 from app.services import ai_service, nlp_service, storage_service
 from app.services.ai_service import TranscriptionError
+from app.services.nlp_service import NLPProcessingError
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _store_nlp_failure(sermon: Sermon, message: str, db: Session) -> None:
+    sermon.status = SermonStatus.failed
+    if sermon.output:
+        meta = dict(sermon.output.nlp_metadata) if isinstance(sermon.output.nlp_metadata, dict) else {}
+        meta["last_error"] = message[:500]
+        sermon.output.nlp_metadata = meta
+    db.commit()
 
 
 @router.post("/transcribe")
@@ -90,13 +101,31 @@ def _process_sermon_job(sermon_id: str):
         sermon.status = SermonStatus.processing
         db.commit()
 
+        db.refresh(sermon)
+        if sermon.status == SermonStatus.pending:
+            logger.info("nlp process job ABORT sermon_id=%s reason=cancelled", sermon_id)
+            return
+
         start = time.time()
         result = nlp_service.process_transcript(
             sermon.output.transcript, sermon.output.ai_model or ai_service.transcription_model_label()
         )
+
+        db.refresh(sermon)
+        if sermon.status == SermonStatus.pending:
+            logger.info("nlp process job ABORT sermon_id=%s reason=cancelled_after_nlp", sermon_id)
+            return
         output = sermon.output or SermonOutput(sermon_id=sermon.id)
+        meta = dict(output.nlp_metadata) if isinstance(output.nlp_metadata, dict) else {}
+        meta.pop("last_error", None)
+        output.nlp_metadata = meta
         for field, value in result.items():
-            setattr(output, field, value)
+            if field == "nlp_metadata":
+                merged = {**meta, **(value or {})}
+                merged.pop("last_error", None)
+                output.nlp_metadata = merged
+            else:
+                setattr(output, field, value)
         output.processing_time = int((time.time() - start) * 1000)
         sermon.processed_at = datetime.utcnow()
         sermon.status = SermonStatus.completed
@@ -109,12 +138,16 @@ def _process_sermon_job(sermon_id: str):
             sermon.status,
             len((output.summary or "")),
         )
-    except Exception:
+    except NLPProcessingError as e:
+        logger.warning("nlp process job FAIL sermon_id=%s NLPProcessingError: %s", sermon_id, e.message)
+        sermon = db.query(Sermon).filter(Sermon.id == sermon_id).first()
+        if sermon:
+            _store_nlp_failure(sermon, e.message, db)
+    except Exception as e:
         logger.exception("nlp process job FAIL sermon_id=%s", sermon_id)
         sermon = db.query(Sermon).filter(Sermon.id == sermon_id).first()
         if sermon:
-            sermon.status = SermonStatus.failed
-            db.commit()
+            _store_nlp_failure(sermon, str(e), db)
     finally:
         db.close()
 
@@ -124,7 +157,7 @@ def process_sermon(
     sermon_id: str,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    _: User = Depends(require_role([RoleEnum.admin, RoleEnum.editor])),
+    current_user: User = Depends(require_role([RoleEnum.super_admin, RoleEnum.admin, RoleEnum.editor])),
 ):
     sermon = db.query(Sermon).filter(Sermon.id == sermon_id).first()
     if not sermon:
@@ -142,6 +175,19 @@ def process_sermon(
             sermon.status,
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Transcript missing")
+    assert_org_access(current_user, sermon.organization_id)
+    if sermon.status == SermonStatus.completed:
+        logger.info("POST /ai/process skip sermon_id=%s already completed", sermon_id)
+        return {"message": "Already completed", "status": sermon.status}
+    if sermon.status == SermonStatus.failed:
+        logger.info(
+            "POST /ai/process retry after failure sermon_id=%s transcript_len=%s",
+            sermon_id,
+            len(sermon.output.transcript),
+        )
+    if sermon.status == SermonStatus.processing:
+        logger.info("POST /ai/process skip sermon_id=%s already processing", sermon_id)
+        return {"message": "Already processing", "status": sermon.status}
     logger.info(
         "POST /ai/process queued sermon_id=%s transcript_len=%s",
         sermon_id,

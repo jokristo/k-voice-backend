@@ -31,8 +31,10 @@ alembic upgrade head
 ```
 4) Start the API:
 ```bash
-uvicorn app.main:app --reload
+uvicorn main:app --reload
 ```
+
+Production / Render : voir [DEPLOY_RENDER.md](./DEPLOY_RENDER.md) et `Dockerfile`.
 
 ## Key Endpoints
 - `GET /health`

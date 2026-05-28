@@ -18,6 +18,7 @@ class SermonOutputBase(BaseModel):
     estimated_read_time: Optional[int] = None
     processing_time: Optional[int] = None
     ai_model: Optional[str] = None
+    nlp_metadata: Optional[Any] = None
 
 
 class SermonOutputCreate(SermonOutputBase):
@@ -42,12 +43,19 @@ class SermonBase(BaseModel):
     audio_size: Optional[int] = None
     audio_duration: Optional[int] = None
     audio_format: Optional[str] = None
+    audio_uploaded_at: Optional[datetime] = None
     status: SermonStatus = SermonStatus.pending
 
 
 class SermonCreate(SermonBase):
+    """Internal / legacy — prefer SermonCreateIn + server-side org assignment."""
     organization_id: str
     recorded_by_id: str
+
+
+class SermonCreateIn(SermonBase):
+    """Client payload: org and recorder come from the authenticated user."""
+    organization_id: Optional[str] = None
 
 
 class SermonUpdate(BaseModel):
