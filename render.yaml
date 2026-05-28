@@ -1,5 +1,11 @@
-# Render Blueprint — K-Voice API (déployer depuis le dossier k-voice-backend)
+# Render Blueprint — K-Voice API (PostgreSQL + disque audio)
 # https://render.com/docs/blueprint-spec
+
+databases:
+  - name: kvoice-db
+    plan: basic-256mb
+    databaseName: kvoice
+    user: kvoice
 
 services:
   - type: web
@@ -10,15 +16,18 @@ services:
     healthCheckPath: /health
     dockerfilePath: ./Dockerfile
     dockerContext: .
+    # Fichiers audio uniquement (la base est sur PostgreSQL)
     disk:
-      name: kvoice-data
+      name: kvoice-storage
       mountPath: /data
       sizeGB: 10
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
       - key: DATABASE_URL
-        value: sqlite:////data/kvoice.db
+        fromDatabase:
+          name: kvoice-db
+          property: connectionString
       - key: STORAGE_LOCAL_PATH
         value: /data/storage
       - key: SECRET_KEY
@@ -51,10 +60,3 @@ services:
         sync: false
       - key: SUPER_ADMIN_PASSWORD
         sync: false
-
-# Option PostgreSQL (décommenter et remplacer DATABASE_URL sur le service web) :
-# databases:
-#   - name: kvoice-db
-#     plan: free
-#     databaseName: kvoice
-#     user: kvoice

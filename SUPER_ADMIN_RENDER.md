@@ -12,7 +12,8 @@ Ce guide concerne le service **backend** (`k-voice-backend`) déployé sur Rende
    # {"status":"ok","ffmpeg":true}
    ```
 2. Les **migrations** ont tourné au démarrage (`alembic upgrade head` via `scripts/render_start.sh`).
-3. Un **disque persistant** est monté sur `/data` (SQLite + fichiers audio), sinon la base est recréée vide à chaque redeploy.
+3. **PostgreSQL** : la base Render `kvoice-db` est liée via `DATABASE_URL` (voir `POSTGRES_PROD.md`).
+4. Un **disque persistant** sur `/data` sert aux **fichiers audio** (`STORAGE_LOCAL_PATH=/data/storage`), pas à PostgreSQL.
 
 ---
 
@@ -128,7 +129,7 @@ curl -s -X POST "https://VOTRE-API.onrender.com/auth/login" \
 - Utiliser les **secrets** Render (Environment → Secret).
 - Désactiver `RUN_BOOTSTRAP` après la première création.
 - Changer le mot de passe par défaut (`admin`) avant toute mise en production.
-- En production, préférer **PostgreSQL** Render plutôt que SQLite sur disque (voir `DEPLOY_RENDER.md`).
+- En production : **PostgreSQL** Render (config par défaut dans `render.yaml`) — voir `POSTGRES_PROD.md`.
 
 ---
 
@@ -138,7 +139,8 @@ curl -s -X POST "https://VOTRE-API.onrender.com/auth/login" \
 |----------|----------------|--------|
 | Login « identifiants incorrects » | Mauvais email/mot de passe ou bootstrap non exécuté | Vérifier les logs ; relancer bootstrap (méthode 1 ou 2) |
 | Pas de menu Admin | Compte pas `super_admin` | Relancer `bootstrap_super_admin.py` avec le bon email |
-| Base vide après redeploy | Pas de disque `/data` | Ajouter un **Disk** Render monté sur `/data` ; `DATABASE_URL=sqlite:////data/kvoice.db` |
+| Base vide après redeploy | `DATABASE_URL` non liée à PostgreSQL | Lier la base Render (Internal URL) ; vérifier `alembic upgrade head` dans les logs |
+| Audio perdus après redeploy | Pas de disque `/data` | Disk mount `/data` + `STORAGE_LOCAL_PATH=/data/storage` |
 | CORS / erreur réseau frontend | `CORS_ORIGINS` incorrect | Mettre l’URL exacte du frontend (https, sans slash final) |
 | Bootstrap à chaque deploy | `RUN_BOOTSTRAP=true` en permanence | Passer à `false` après création du compte |
 
@@ -146,6 +148,7 @@ curl -s -X POST "https://VOTRE-API.onrender.com/auth/login" \
 
 ## Références
 
+- PostgreSQL prod : `POSTGRES_PROD.md`
 - Déploiement complet API + frontend : `DEPLOY_RENDER.md`
 - Dockerfile : `Dockerfile` + `scripts/render_start.sh`
 - Blueprint Render : `render.yaml`

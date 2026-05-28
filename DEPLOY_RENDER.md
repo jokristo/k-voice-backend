@@ -1,59 +1,81 @@
 # Déploiement sur Render — K-Voice
 
-Deux services Render séparés : **API** (`k-voice-backend`) et **frontend** (`ecclesiato`).
+Deux services Render : **API** (`k-voice-backend`, Docker + **PostgreSQL**) et **frontend** (`ecclesiato`, Node).
 
-## 1. API backend (Docker)
+---
+
+## 1. API backend (Docker + PostgreSQL)
+
+### Architecture prod
+
+| Composant | Render | Rôle |
+|-----------|--------|------|
+| **PostgreSQL** | Base `kvoice-db` | Utilisateurs, orgs, sermons, transcriptions |
+| **Disque `/data`** | 10 Go monté sur le web service | Fichiers audio (`STORAGE_LOCAL_PATH=/data/storage`) |
+| **Web service** | Docker `kvoice-api` | FastAPI + ffmpeg + migrations Alembic |
+
+La base **n’est plus** sur le disque local : seuls les fichiers audio utilisent `/data`.
 
 ### Fichiers fournis
 
 | Fichier | Rôle |
 |---------|------|
-| `Dockerfile` | Python 3.11 + **ffmpeg** + dépendances pip |
-| `scripts/render_start.sh` | Migrations Alembic + démarrage uvicorn |
-| `render.yaml` | Blueprint Render (disque persistant, variables) |
-| `requirements.txt` | Paquets Python uniquement (pas ffmpeg) |
+| `Dockerfile` | Python 3.11 + ffmpeg + `psycopg2-binary` |
+| `scripts/render_start.sh` | `alembic upgrade head` + uvicorn |
+| `render.yaml` | Blueprint : PostgreSQL + API + disque storage |
+| `requirements.txt` | `psycopg2-binary` pour PostgreSQL |
 
-### Créer le service
+### Option A — Blueprint (recommandé)
 
-**Option A — Blueprint**
-
-1. Repo Git connecté à Render.
-2. New → **Blueprint** → pointer le dossier `k-voice-backend` (ou repo racine si mono-repo).
-3. Render lit `render.yaml`.
-4. Renseigner les secrets marqués `sync: false` :
+1. Repo Git → Render → **New Blueprint**.
+2. Root directory : `k-voice-backend` (si monorepo).
+3. Render crée automatiquement :
+   - la base **kvoice-db**
+   - le service **kvoice-api** avec `DATABASE_URL` liée à la base
+4. Renseigner les secrets (`sync: false`) :
    - `OPENAI_API_KEY`
-   - `CORS_ORIGINS` → URL du frontend, ex. `https://ecclesiato.onrender.com` ou JSON `["https://..."]`
+   - `CORS_ORIGINS` → `https://votre-frontend.onrender.com`
    - `SUPER_ADMIN_EMAIL` / `SUPER_ADMIN_PASSWORD` (si `RUN_BOOTSTRAP=true`)
+5. Premier deploy → vérifier les logs : migrations + bootstrap super-admin.
+6. Mettre **`RUN_BOOTSTRAP=false`** après création du compte.
 
-**Option B — Web Service Docker manuel**
+### Option B — Configuration manuelle
 
-- **Root Directory** : `k-voice-backend` (si monorepo)
-- **Environment** : Docker
-- **Dockerfile path** : `./Dockerfile`
-- **Health check** : `/health`
-- **Disk** : monter `/data` (10 Go) — SQLite + fichiers audio
+1. **New → PostgreSQL** → noter l’**Internal Database URL**.
+2. **New → Web Service** → Docker, Dockerfile `./Dockerfile`.
+3. **Environment** :
+   ```env
+   DATABASE_URL=<Internal Database URL depuis Render>
+   STORAGE_LOCAL_PATH=/data/storage
+   SECRET_KEY=<généré>
+   OPENAI_API_KEY=...
+   TRANSCRIPTION_PROVIDER=openai
+   NLP_PROVIDER=openai
+   CORS_ORIGINS=https://votre-frontend.onrender.com
+   RUN_BOOTSTRAP=true
+   SUPER_ADMIN_EMAIL=...
+   SUPER_ADMIN_PASSWORD=...
+   ```
+4. **Disque** : ajouter un disk mount `/data` (fichiers audio).
+5. **Health check** : `/health`
 
-### Variables d'environnement importantes
+Render injecte souvent une URL `postgres://…` : l’API la convertit automatiquement en `postgresql://…`.
+
+### Variables importantes
 
 ```env
-DATABASE_URL=sqlite:////data/kvoice.db
+DATABASE_URL=postgresql://...   # fourni par Render (base liée)
 STORAGE_LOCAL_PATH=/data/storage
 SECRET_KEY=<généré>
-OPENAI_API_KEY=your-openai-api-key-here
+OPENAI_API_KEY=...
 TRANSCRIPTION_PROVIDER=openai
 NLP_PROVIDER=openai
 CORS_ORIGINS=https://votre-frontend.onrender.com
-MAX_UPLOAD_SIZE_MB=100
-AUDIO_COMPRESSION_ENABLED=true
 ```
 
-Après le premier déploiement, mettre `RUN_BOOTSTRAP=false` pour ne pas réinitialiser le super-admin à chaque redeploy.
+### Super-admin
 
-### PostgreSQL (recommandé en prod)
-
-1. Créer une base **PostgreSQL** sur Render.
-2. Remplacer `DATABASE_URL` par la connection string Render (`postgresql://...`).
-3. Redéployer — `alembic upgrade head` s’exécute au démarrage.
+Voir **`SUPER_ADMIN_RENDER.md`**.
 
 ### Vérification
 
@@ -66,21 +88,10 @@ curl https://kvoice-api.onrender.com/health
 
 ## 2. Frontend Next.js (`ecclesiato`)
 
-### Fichiers fournis
-
-| Fichier | Rôle |
-|---------|------|
-| `render.yaml` | Build / start Node |
-| `package.json` | Scripts `build:render` et `start:render` |
-
-### Créer le service
-
 - **Runtime** : Node 20
 - **Root Directory** : `ecclesiato`
 - **Build** : `npm ci && npm run build:render`
 - **Start** : `npm run start:render`
-
-### Variables
 
 ```env
 NEXT_PUBLIC_API_URL=https://kvoice-api.onrender.com
@@ -88,30 +99,59 @@ NEXTAUTH_URL=https://ecclesiato.onrender.com
 NEXTAUTH_SECRET=<généré>
 ```
 
-Le frontend **ne utilise pas** `requirements.txt` — uniquement `package.json`.
-
 ---
 
 ## 3. Ordre de déploiement
 
-1. Déployer l’**API** → noter l’URL.
-2. Configurer `CORS_ORIGINS` sur l’API avec l’URL frontend (même avant deploy front si connue).
-3. Déployer le **frontend** avec `NEXT_PUBLIC_API_URL` pointant vers l’API.
-4. Se connecter avec le compte super_admin bootstrap.
+1. Déployer l’**API** (PostgreSQL + Docker) → noter l’URL.
+2. `CORS_ORIGINS` = URL du frontend.
+3. Déployer le **frontend** avec `NEXT_PUBLIC_API_URL`.
+4. Connexion super-admin → `/admin`.
 
 ---
 
-## 4. Limitations Render
+## 4. Développement local (SQLite)
 
-- **Disque** : sans disk mount, SQLite et `storage/` sont perdus à chaque redeploy.
-- **Timeouts** : transcriptions longues peuvent dépasser le timeout HTTP ; le job background continue tant que l’instance reste vivante.
-- **faster-whisper** : lourd sur CPU ; en prod garder `TRANSCRIPTION_PROVIDER=openai`.
-- **Secrets** : ne jamais committer `.env` — utiliser le dashboard Render.
+Par défaut en local :
+
+```env
+database_url=sqlite:///./kvoice.db
+storage_local_path=storage
+```
+
+Pour tester PostgreSQL en local (Docker) :
+
+```bash
+docker run -d --name kvoice-pg -e POSTGRES_PASSWORD=kvoice -e POSTGRES_DB=kvoice -p 5432:5432 postgres:16
+```
+
+```env
+DATABASE_URL=postgresql://postgres:kvoice@localhost:5432/kvoice
+```
+
+Puis :
+
+```bash
+alembic upgrade head
+python scripts/bootstrap_super_admin.py
+```
 
 ---
 
-## 5. requirements.txt — rappel
+## 5. Limitations Render
 
-Contient les libs **pip** seulement. Dépendances système installées dans le **Dockerfile** :
+- **Disque** : obligatoire pour les fichiers audio (pas pour PostgreSQL).
+- **Timeouts HTTP** : transcriptions longues ; le traitement continue en arrière-plan si l’instance reste active.
+- **faster-whisper** : garder `TRANSCRIPTION_PROVIDER=openai` en prod.
+- **Secrets** : uniquement via le dashboard Render, jamais dans Git.
 
-- `ffmpeg` / `ffprobe` (compression + durée audio)
+---
+
+## 6. Dépannage PostgreSQL
+
+| Problème | Solution |
+|----------|----------|
+| `No module named 'psycopg2'` | Redéployer après mise à jour `requirements.txt` (rebuild Docker) |
+| Erreur enum `super_admin` | `alembic upgrade head` (migration `0003` ajoute la valeur sur PostgreSQL) |
+| Connexion refusée | Utiliser l’**Internal** Database URL sur le service API (même région) |
+| `postgres://` vs `postgresql://` | Géré automatiquement dans `app/core/config.py` |
