@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     audio_retention_sweep_interval_s: int = 3600
     # Limite API OpenAI Whisper (fichier unique)
     openai_whisper_max_file_mb: int = 25
+    # Découpage Whisper : chevauchement entre morceaux (secondes)
+    whisper_chunk_overlap_seconds: int = 35
+    whisper_context_tail_chars: int = 400
     # Compression automatique (ffmpeg) vers MP3 mono avant transcription
     audio_compression_enabled: bool = True
     audio_compression_target_mb: int = 24
@@ -59,9 +62,17 @@ class Settings(BaseSettings):
     openai_nlp_normalize_max_tokens: int = 4096
     openai_nlp_summarize_max_tokens: int = 4096
     # Texte max envoyé à l'étape résumé (prédications très longues)
-    openai_nlp_summarize_max_input_chars: int = 45_000
-    openai_nlp_json_retry_attempts: int = 2
+    openai_nlp_summarize_max_input_chars: int = 28_000
+    # 1 tentative par appel résumé (évite de brûler des crédits sur les mêmes erreurs)
+    openai_nlp_json_retry_attempts: int = 1
+    openai_nlp_summarize_meta_max_tokens: int = 1200
+    openai_nlp_summarize_body_max_tokens: int = 2800
     openai_nlp_timeout_s: int = 300
+    # Résumé map-reduce : couvre toute la transcription par sections
+    openai_nlp_map_section_chars: int = 12_000
+    openai_nlp_map_section_max_tokens: int = 900
+    openai_nlp_map_final_max_tokens: int = 3000
+    openai_nlp_map_reduce_min_chars: int = 8_000
     openai_whisper_language: str = "fr"
     # --- Transcription locale (faster-whisper) : voir TRANSCRIPTION_PROVIDER=local
     # tiny, base, small, medium, large-v2, large-v3, etc.

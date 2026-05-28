@@ -14,6 +14,7 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI, 
 from app.core.config import settings
 from app.models import Sermon
 from app.services.media_service import MediaProcessingError, prepare_whisper_audio_paths
+from app.services.transcript_merge import merge_transcript_chunks, whisper_continuation_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +210,7 @@ def _get_openai_client() -> OpenAI:
         return _openai_client
 
 
-def _transcribe_openai(file_path: Path) -> Dict[str, Any]:
+def _transcribe_openai(file_path: Path, *, continuation_prompt: Optional[str] = None) -> Dict[str, Any]:
     if not settings.openai_api_key or not settings.openai_api_key.strip():
         raise TranscriptionError(
             "OPENAI_API_KEY manquante. Ajoute-la dans .env pour TRANSCRIPTION_PROVIDER=openai, "
@@ -220,7 +221,7 @@ def _transcribe_openai(file_path: Path) -> Dict[str, Any]:
     client = _get_openai_client()
     from app.services import nlp_service
 
-    whisper_prompt = nlp_service.whisper_prompt_hint()
+    whisper_prompt = continuation_prompt or nlp_service.whisper_prompt_hint()
     size_mb = file_path.stat().st_size / (1024 * 1024)
     logger.info(
         "openai whisper request file=%s size_mb=%.1f timeout_s=%s max_retries=%s",
@@ -361,6 +362,9 @@ def transcribe_audio(file_path: Path) -> Dict[str, Any]:
 
         start = time.time()
         transcripts: list[str] = []
+        base_hint = nlp_service.whisper_prompt_hint()
+        previous_text = ""
+
         for index, chunk_path in enumerate(paths, start=1):
             logger.info(
                 "transcribe_openai chunk %s/%s file=%s size_mb=%.1f",
@@ -369,14 +373,22 @@ def transcribe_audio(file_path: Path) -> Dict[str, Any]:
                 chunk_path.name,
                 chunk_path.stat().st_size / (1024 * 1024),
             )
-            chunk_result = _transcribe_openai(chunk_path)
+            cont = None
+            if index > 1 and previous_text:
+                cont = whisper_continuation_prompt(
+                    base_hint,
+                    previous_text,
+                    settings.whisper_context_tail_chars,
+                )
+            chunk_result = _transcribe_openai(chunk_path, continuation_prompt=cont)
             text = (chunk_result.get("transcript") or "").strip()
             if text:
                 transcripts.append(text)
+                previous_text = text
 
-        merged = "\n\n".join(transcripts)
+        merged = merge_transcript_chunks(transcripts)
         logger.info(
-            "transcribe_openai merged chunks=%s transcript_len=%s",
+            "transcribe_openai merged chunks=%s transcript_len=%s (overlap+smooth)",
             len(paths),
             len(merged),
         )

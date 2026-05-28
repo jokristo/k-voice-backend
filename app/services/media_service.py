@@ -133,32 +133,23 @@ def _try_compress_to_target(source: Path, target_bytes: int) -> Tuple[Optional[P
     return None, 0
 
 
-def _split_audio_mp3(source: Path, target_bytes: int) -> List[Path]:
-    """Découpe en segments MP3, chacun sous target_bytes (durée calculée au débit plancher)."""
-    floor_kbps = settings.audio_compression_floor_kbps
-    segment_seconds = max(
-        300,
-        int((target_bytes * 8) / (floor_kbps * 1000) * 0.88),
-    )
-    chunk_dir = source.parent / f"{source.stem}_chunks"
-    if chunk_dir.exists():
-        for old in chunk_dir.glob("part_*.mp3"):
-            old.unlink()
-    chunk_dir.mkdir(parents=True, exist_ok=True)
-    pattern = str(chunk_dir / "part_%03d.mp3")
-
-    logger.info(
-        "split audio source=%s segment_s=%s target_mb=%.1f",
-        source.name,
-        segment_seconds,
-        target_bytes / (1024 * 1024),
-    )
-
+def _extract_audio_segment(
+    source: Path,
+    dest: Path,
+    start_s: float,
+    duration_s: float,
+    bitrate_kbps: int,
+) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
     try:
         subprocess.run(
             [
                 "ffmpeg",
                 "-y",
+                "-ss",
+                str(start_s),
+                "-t",
+                str(duration_s),
                 "-i",
                 str(source),
                 "-vn",
@@ -169,14 +160,8 @@ def _split_audio_mp3(source: Path, target_bytes: int) -> List[Path]:
                 "-c:a",
                 "libmp3lame",
                 "-b:a",
-                f"{floor_kbps}k",
-                "-f",
-                "segment",
-                "-segment_time",
-                str(segment_seconds),
-                "-reset_timestamps",
-                "1",
-                pattern,
+                f"{bitrate_kbps}k",
+                str(dest),
             ],
             capture_output=True,
             check=True,
@@ -184,22 +169,68 @@ def _split_audio_mp3(source: Path, target_bytes: int) -> List[Path]:
         )
     except subprocess.CalledProcessError as e:
         stderr = (e.stderr or b"").decode(errors="replace")[-500:]
-        raise MediaProcessingError(f"Échec découpage ffmpeg : {stderr}") from e
+        raise MediaProcessingError(f"Échec extraction segment ffmpeg : {stderr}") from e
 
-    parts = sorted(chunk_dir.glob("part_*.mp3"))
+
+def _split_audio_mp3(source: Path, target_bytes: int) -> List[Path]:
+    """
+    Découpe en segments MP3 avec chevauchement temporel (overlap).
+    Chaque segment ≤ target_bytes ; les jonctions se recouvrent pour Whisper.
+    """
+    floor_kbps = settings.audio_compression_floor_kbps
+    overlap_s = max(10, settings.whisper_chunk_overlap_seconds)
+    segment_seconds = max(
+        300,
+        int((target_bytes * 8) / (floor_kbps * 1000) * 0.88),
+    )
+    stride_s = max(120, segment_seconds - overlap_s)
+
+    duration_s = get_audio_duration_seconds(source)
+    if not duration_s or duration_s < 1:
+        raise MediaProcessingError("Impossible de lire la durée audio pour le découpage.")
+
+    chunk_dir = source.parent / f"{source.stem}_chunks"
+    if chunk_dir.exists():
+        for old in chunk_dir.glob("part_*.mp3"):
+            old.unlink()
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.info(
+        "split audio overlap source=%s duration_s=%s segment_s=%s overlap_s=%s stride_s=%s",
+        source.name,
+        duration_s,
+        segment_seconds,
+        overlap_s,
+        stride_s,
+    )
+
+    parts: List[Path] = []
+    start = 0.0
+    index = 0
+    while start < duration_s - 0.5:
+        seg_len = min(float(segment_seconds), float(duration_s) - start)
+        out_path = chunk_dir / f"part_{index:03d}.mp3"
+        _extract_audio_segment(source, out_path, start, seg_len, floor_kbps)
+        if out_path.stat().st_size > target_bytes:
+            out_path.unlink(missing_ok=True)
+            raise MediaProcessingError(
+                f"Segment {out_path.name} > {target_bytes // (1024 * 1024)} Mo malgré la durée cible."
+            )
+        parts.append(out_path)
+        if start + seg_len >= duration_s - 0.5:
+            break
+        start += stride_s
+        index += 1
+
     if not parts:
         raise MediaProcessingError("Découpage audio : aucun segment produit")
 
-    oversized = [p for p in parts if p.stat().st_size > target_bytes]
-    if oversized:
-        for p in parts:
-            p.unlink()
-        raise MediaProcessingError(
-            f"Segments encore trop volumineux ({len(oversized)} partie(s) > "
-            f"{target_bytes // (1024 * 1024)} Mo). Réduisez la durée ou la qualité source."
-        )
-
-    logger.info("split done parts=%s total_mb=%.1f", len(parts), sum(p.stat().st_size for p in parts) / (1024 * 1024))
+    logger.info(
+        "split overlap done parts=%s overlap_s=%s total_mb=%.1f",
+        len(parts),
+        overlap_s,
+        sum(p.stat().st_size for p in parts) / (1024 * 1024),
+    )
     return parts
 
 
