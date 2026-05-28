@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     )
     app_name: str = "K-Voice API"
     environment: str = "development"
+    # Local : sqlite. Prod Render : DATABASE_URL (postgresql://…)
     database_url: str = "sqlite:///./kvoice.db"
     secret_key: str = "super-secret-key"
     access_token_expire_minutes: int = 30
@@ -85,6 +86,16 @@ class Settings(BaseSettings):
     local_whisper_language: str = ""
     # Cache des poids Hugging Face (optionnel)
     local_whisper_download_root: str = ""
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _normalize_database_url(cls, v: object) -> object:
+        if isinstance(v, str):
+            raw = v.strip()
+            # Render fournit parfois postgres:// ; SQLAlchemy attend postgresql://
+            if raw.startswith("postgres://"):
+                return "postgresql://" + raw[len("postgres://") :]
+        return v
 
     @field_validator("cors_origins", mode="before")
     @classmethod

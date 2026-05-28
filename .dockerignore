@@ -14,3 +14,5 @@ storage
 dev.log
 *.md
 !DEPLOY_RENDER.md
+!POSTGRES_PROD.md
+!SUPER_ADMIN_RENDER.md
