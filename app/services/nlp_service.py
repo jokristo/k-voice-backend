@@ -1,7 +1,9 @@
 import json
 import logging
 import re
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional
+
+JsonCallPurpose = Literal["normalize", "summarize"]
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI, RateLimitError
 
@@ -68,10 +70,19 @@ SUMMARIZE_JSON_HINT = """{
   "references": ["..."]
 }"""
 
+SUMMARIZE_ALLOWED_KEYS = (
+    "central_message, summary, key_points, main_themes, key_verses, references"
+)
+
+SUMMARIZE_SINGLE_JSON_SYSTEM = f"""{SUMMARIZE_SYSTEM_PROMPT}
+
+Clés JSON AUTORISÉES (uniquement) : {SUMMARIZE_ALLOWED_KEYS}.
+Toute autre clé (corrected_transcript, corrections, confidence, etc.) est interdite."""
+
 SUMMARIZE_META_SYSTEM = f"""Tu es un pasteur senior. Synthèse STRUCTURÉE d'un extrait de prédication.
 {SUMMARIZE_FORBIDDEN}
 Ne produis PAS le champ summary (il sera fait séparément).
-JSON compact uniquement."""
+JSON compact uniquement. Clés autorisées : central_message, key_points, main_themes, key_verses, references."""
 
 SUMMARIZE_META_JSON_HINT = """{
   "central_message": "max 25 mots",
@@ -264,6 +275,26 @@ def _looks_like_normalize_output(content: str) -> bool:
     return "corrected_transcript" in head or '"corrections"' in head
 
 
+def _prose_looks_like_recopy(summary: str, source: str) -> bool:
+    """Détecte une recopie quasi intégrale de l'extrait au lieu d'un résumé."""
+    s = (summary or "").strip()
+    src = (source or "").strip()
+    if len(s) < 300 or len(src) < 300:
+        return False
+    probe = src[:400].lower()
+    if probe and probe in s.lower() and len(s) > len(src) * 0.55:
+        return True
+    return False
+
+
+def _summarize_json_user(excerpt: str, schema_hint: str) -> str:
+    return (
+        f"Schéma JSON OBLIGATOIRE — respecte exactement ces clés, aucune autre :\n"
+        f"{schema_hint}\n\n"
+        f"---\nExtrait de prédication (synthèse uniquement, ne pas recopier) :\n\n{excerpt}"
+    )
+
+
 def _get_openai_client() -> OpenAI:
     return OpenAI(
         api_key=settings.openai_api_key,
@@ -326,6 +357,7 @@ def _openai_json_call(
     max_tokens: int = 4096,
     validator: Optional[Callable[[Dict[str, Any]], None]] = None,
     max_attempts: Optional[int] = None,
+    purpose: JsonCallPurpose = "summarize",
 ) -> Dict[str, Any]:
     if not settings.openai_api_key.strip():
         raise NLPProcessingError("OPENAI_API_KEY manquante pour le NLP.")
@@ -343,7 +375,7 @@ def _openai_json_call(
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
                 ],
-                temperature=0.2,
+                temperature=0.1 if purpose == "summarize" else 0.2,
                 max_tokens=max_tokens,
             )
         except RateLimitError as e:
@@ -368,14 +400,14 @@ def _openai_json_call(
                 len(content),
             )
 
-        if _looks_like_normalize_output(content):
-            logger.error(
-                "nlp abort normalize-shaped JSON (no retry) preview=%r",
+        # Étape normalisation : corrected_transcript est le schéma attendu
+        if purpose == "summarize" and _looks_like_normalize_output(content):
+            logger.warning(
+                "nlp summarize got normalize-shaped JSON, fallback preview=%r",
                 content[:160],
             )
             raise NLPProcessingError(
-                "Le modèle a tenté de recopier la transcription (corrected_transcript). "
-                "Relancez le résumé — le pipeline safe sera utilisé."
+                "Réponse de normalisation au lieu du résumé — repli automatique."
             )
 
         data = _parse_json_content(content)
@@ -386,8 +418,14 @@ def _openai_json_call(
     raise NLPProcessingError("JSON invalide")
 
 
-def _openai_prose_call(system: str, user: str, max_tokens: int) -> str:
-    """Résumé en texte libre — évite les JSON tronqués sur longs contenus."""
+def _openai_prose_call(
+    system: str,
+    user: str,
+    max_tokens: int,
+    *,
+    source_excerpt: str = "",
+) -> str:
+    """Résumé en texte libre — 1 seul appel (repli rare, pas de retry token)."""
     if not settings.openai_api_key.strip():
         raise NLPProcessingError("OPENAI_API_KEY manquante pour le NLP.")
 
@@ -398,13 +436,13 @@ def _openai_prose_call(system: str, user: str, max_tokens: int) -> str:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        temperature=0.25,
+        temperature=0.2,
         max_tokens=max_tokens,
     )
     content = (response.choices[0].message.content or "").strip()
     if not content:
         raise NLPProcessingError("Résumé vide")
-    if _looks_like_normalize_output(content):
+    if _looks_like_normalize_output(content) or _prose_looks_like_recopy(content, source_excerpt):
         raise NLPProcessingError("Le modèle a recopié la transcription au lieu de résumer")
     if getattr(response.choices[0], "finish_reason", None) == "length":
         logger.warning("nlp prose finish_reason=length content_len=%s", len(content))
@@ -436,11 +474,22 @@ def _normalize_transcript(raw: str) -> Dict[str, Any]:
         }
 
     text = _truncate(text)
-    data = _openai_json_call(
-        NORMALIZE_SYSTEM_PROMPT,
-        f"Schéma JSON :\n{NORMALIZE_JSON_HINT}\n\nTranscription ASR :\n\n{text}",
-        max_tokens=min(8192, settings.openai_nlp_normalize_max_tokens),
-    )
+    try:
+        data = _openai_json_call(
+            NORMALIZE_SYSTEM_PROMPT,
+            f"Schéma JSON :\n{NORMALIZE_JSON_HINT}\n\nTranscription ASR :\n\n{text}",
+            max_tokens=min(8192, settings.openai_nlp_normalize_max_tokens),
+            purpose="normalize",
+        )
+    except NLPProcessingError as e:
+        logger.warning("nlp normalize failed, using raw transcript: %s", e.message)
+        return {
+            "corrected_transcript": "",
+            "corrections": [],
+            "confidence": "low",
+            "normalize_skipped": True,
+            "normalize_skip_reason": "normalize_call_failed",
+        }
 
     corrected = (data.get("corrected_transcript") or raw).strip()
     corrections_raw = data.get("corrections") or []
@@ -488,10 +537,10 @@ def _summarize_result_from_data(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def _summarize_safe_pipeline(text: str) -> Dict[str, Any]:
     """
-    Pipeline unique pour toutes les longueurs :
-    - 1 appel JSON compact (meta)
-    - 1 appel prose (summary) sans JSON
-    Pas de retry automatique coûteux.
+    Prédications courtes (< map-reduce) :
+    1) Un seul appel JSON strict (résumé complet) — chemin nominal, 1× tokens.
+    2) Si échec schéma uniquement : un seul appel prose (repli, pas de 2ᵉ JSON).
+    Jamais meta JSON + prose systématiquement (évite double consommation).
     """
     excerpt = _excerpt_for_summarize(text)
     logger.info(
@@ -501,41 +550,50 @@ def _summarize_safe_pipeline(text: str) -> Dict[str, Any]:
     )
 
     try:
-        meta = _openai_json_call(
-            SUMMARIZE_META_SYSTEM,
-            f"Schéma JSON (petit) :\n{SUMMARIZE_META_JSON_HINT}\n\n"
-            f"Extrait de prédication (ne pas recopier) :\n\n{excerpt}",
-            max_tokens=settings.openai_nlp_summarize_meta_max_tokens,
-            validator=_validate_meta_summarize,
+        data = _openai_json_call(
+            SUMMARIZE_SINGLE_JSON_SYSTEM,
+            _summarize_json_user(excerpt, SUMMARIZE_JSON_HINT),
+            max_tokens=min(settings.openai_nlp_summarize_max_tokens, 3500),
+            validator=_validate_full_summarize,
             max_attempts=1,
+            purpose="summarize",
         )
+        result = _summarize_result_from_data(data)
+        logger.info(
+            "nlp summarize single-json ok central=%r summary_len=%s key_points=%s",
+            (result["central_message"] or "")[:60],
+            len(result["summary"]),
+            len(result["key_points"]),
+        )
+        result["_pipeline_mode"] = "single-json"
+        return result
     except NLPProcessingError as e:
-        logger.warning("nlp meta failed, prose-only fallback: %s", e.message)
-        meta = {
-            "central_message": "",
-            "key_points": [],
-            "main_themes": [],
-            "key_verses": [],
-            "references": [],
-        }
+        logger.warning("nlp single-json failed, one-shot prose fallback: %s", e.message)
 
     summary_text = _openai_prose_call(
         SUMMARIZE_BODY_PLAIN_SYSTEM,
         f"Extrait de prédication :\n\n{excerpt}\n\nRédige le résumé pastoral.",
         max_tokens=settings.openai_nlp_summarize_body_max_tokens,
+        source_excerpt=excerpt,
     )
 
-    merged = {**meta, "summary": summary_text}
-    result = _summarize_result_from_data(merged)
-    if not result["central_message"] and result["summary"]:
+    result = _summarize_result_from_data({
+        "central_message": "",
+        "summary": summary_text,
+        "key_points": [],
+        "main_themes": [],
+        "key_verses": [],
+        "references": [],
+    })
+    if result["summary"]:
         first = result["summary"].split(".")[0].strip()
         result["central_message"] = (first[:120] + "…") if len(first) > 120 else first
     logger.info(
-        "nlp summarize safe-pipeline ok central=%r summary_len=%s key_points=%s",
+        "nlp summarize prose-fallback ok central=%r summary_len=%s",
         (result["central_message"] or "")[:60],
         len(result["summary"]),
-        len(result["key_points"]),
     )
+    result["_pipeline_mode"] = "prose-fallback"
     return result
 
 
@@ -550,15 +608,27 @@ def _summarize_map_reduce(text: str) -> Dict[str, Any]:
 
     section_notes: List[Dict[str, Any]] = []
     for i, sec in enumerate(sections, start=1):
-        note = _openai_json_call(
-            MAP_SECTION_SYSTEM,
-            f"Section {i}/{len(sections)}.\nSchéma :\n{MAP_SECTION_JSON_HINT}\n\nTexte de la section :\n\n{sec}",
-            max_tokens=settings.openai_nlp_map_section_max_tokens,
-            max_attempts=1,
-        )
-        if _looks_like_normalize_output(json.dumps(note, ensure_ascii=False)):
-            raise NLPProcessingError("section map-reduce : réponse de normalisation inattendue")
-        note["section_index"] = i
+        try:
+            note = _openai_json_call(
+                MAP_SECTION_SYSTEM,
+                f"Section {i}/{len(sections)}.\nSchéma :\n{MAP_SECTION_JSON_HINT}\n\n"
+                f"Texte de la section :\n\n{sec}",
+                max_tokens=settings.openai_nlp_map_section_max_tokens,
+                max_attempts=1,
+                purpose="summarize",
+            )
+        except NLPProcessingError as e:
+            logger.warning("nlp map-reduce section %s failed: %s", i, e.message)
+            note = {
+                "section_index": i,
+                "central_message": "",
+                "key_points": [],
+                "main_themes": [],
+                "key_verses": [],
+                "references": [],
+            }
+        else:
+            note["section_index"] = i
         section_notes.append(note)
 
     digest_parts: List[str] = []
@@ -610,6 +680,7 @@ def _summarize_map_reduce(text: str) -> Dict[str, Any]:
         f"La prédication a été analysée en {len(sections)} sections. "
         f"Synthèses détaillées :\n\n{digest}\n\nRédige le résumé pastoral final.",
         max_tokens=settings.openai_nlp_map_final_max_tokens,
+        source_excerpt=text[: settings.openai_nlp_summarize_max_input_chars],
     )
 
     merged = {**meta, "summary": summary_text}
@@ -635,13 +706,14 @@ def _summarize_corrected(corrected: str) -> Dict[str, Any]:
 
 
 def _process_openai_two_step(transcript: str, transcription_model: str) -> Dict:
-    # Étape 1 — normalisation
+    # Étape 1 — normalisation (échec non bloquant : on résume le transcript brut)
     normalized = _normalize_transcript(transcript)
-    corrected = normalized["corrected_transcript"] or transcript
-    summarize_source = corrected if corrected.strip() else transcript
+    corrected = normalized.get("corrected_transcript") or ""
+    summarize_source = corrected.strip() if corrected.strip() else transcript
 
-    # Étape 2 — résumé (texte corrigé ou brut si normalisation sautée)
+    # Étape 2 — résumé (1 passage ; pas de 2ᵉ pipeline sur transcript brut)
     summary_data = _summarize_corrected(summarize_source)
+    pipeline_mode = summary_data.pop("_pipeline_mode", "2-step-safe")
 
     word_count = len(transcript.split())
     label = nlp_model_label(transcription_model)
@@ -653,7 +725,7 @@ def _process_openai_two_step(transcript: str, transcription_model: str) -> Dict:
         "confidence": normalized["confidence"],
         "pipeline": "map-reduce"
         if len(summarize_source.strip()) >= settings.openai_nlp_map_reduce_min_chars
-        else "2-step-safe",
+        else pipeline_mode,
         "normalize_skipped": normalized.get("normalize_skipped", False),
         "map_reduce_sections": len(
             _split_into_sections(
