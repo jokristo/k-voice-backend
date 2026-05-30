@@ -71,7 +71,16 @@ OPENAI_API_KEY=...
 TRANSCRIPTION_PROVIDER=openai
 NLP_PROVIDER=openai
 CORS_ORIGINS=https://votre-frontend.onrender.com
+
+# Abonnements PayPal (router /billing)
+PAYPAL_MODE=sandbox
+PAYPAL_CLIENT_ID=<client id>
+PAYPAL_CLIENT_SECRET=<secret>
+PAYPAL_PLAN_ID_ESSENTIEL=P-9JW052881K6990917NINPJMI
+PAYPAL_PLAN_ID_AVANCE=P-75V114236B1696345NINPM6A
 ```
+
+Après deploy : `alembic upgrade head` applique la migration `0005_organization_billing`.
 
 ### Super-admin
 
@@ -97,6 +106,7 @@ curl https://kvoice-api.onrender.com/health
 NEXT_PUBLIC_API_URL=https://kvoice-api.onrender.com
 NEXTAUTH_URL=https://ecclesiato.onrender.com
 NEXTAUTH_SECRET=<généré>
+NEXT_PUBLIC_PAYPAL_CLIENT_ID=<même client id public PayPal>
 ```
 
 ---
