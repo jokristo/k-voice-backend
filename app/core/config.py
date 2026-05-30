@@ -1,6 +1,7 @@
 import json
 from functools import lru_cache
 from typing import List, Literal
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from pydantic import AnyHttpUrl, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -90,12 +91,23 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def _normalize_database_url(cls, v: object) -> object:
-        if isinstance(v, str):
-            raw = v.strip()
-            # Render fournit parfois postgres:// ; SQLAlchemy attend postgresql://
-            if raw.startswith("postgres://"):
-                return "postgresql://" + raw[len("postgres://") :]
-        return v
+        if not isinstance(v, str):
+            return v
+        raw = v.strip()
+        if raw.startswith("postgres://"):
+            raw = "postgresql://" + raw[len("postgres://") :]
+        if not raw.startswith("postgresql"):
+            return raw
+
+        parsed = urlparse(raw)
+        host = parsed.hostname or ""
+        # URL externe Render (*.render.com) : SSL requis
+        if host.endswith(".render.com"):
+            qs = {k: values[0] for k, values in parse_qs(parsed.query).items()}
+            if "sslmode" not in qs:
+                qs["sslmode"] = "require"
+                raw = urlunparse(parsed._replace(query=urlencode(qs)))
+        return raw
 
     @field_validator("cors_origins", mode="before")
     @classmethod
