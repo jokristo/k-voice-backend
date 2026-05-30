@@ -88,6 +88,13 @@ class Settings(BaseSettings):
     # Cache des poids Hugging Face (optionnel)
     local_whisper_download_root: str = ""
 
+    # PayPal subscriptions (client id is public; secret stays server-only)
+    paypal_mode: Literal["sandbox", "live"] = "sandbox"
+    paypal_client_id: str = ""
+    paypal_client_secret: str = ""
+    paypal_plan_id_essentiel: str = "P-9JW052881K6990917NINPJMI"
+    paypal_plan_id_avance: str = "P-75V114236B1696345NINPM6A"
+
     @field_validator("database_url", mode="before")
     @classmethod
     def _normalize_database_url(cls, v: object) -> object:

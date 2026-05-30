@@ -48,6 +48,13 @@ class Organization(Base):
     phone = Column(String)
     email = Column(String)
     logo = Column(String)
+    # Billing (PayPal subscriptions)
+    billing_plan = Column(String(32), nullable=True)  # essentiel, avance; null = free tier
+    subscription_status = Column(String(32), nullable=False, default="none")
+    payment_provider = Column(String(32), nullable=True)
+    external_subscription_id = Column(String(128), nullable=True)
+    paypal_plan_id = Column(String(64), nullable=True)
+    subscription_started_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

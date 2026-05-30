@@ -9,10 +9,11 @@ from sqlalchemy.orm import Session
 from app.core.database import SessionLocal, get_db
 from app.deps.auth import get_current_user, require_role
 from app.deps.scopes import assert_org_access, is_super_admin, resolve_sermon_organization_id
-from app.models import RoleEnum, Sermon, SermonOutput, SermonStatus, User
+from app.models import Organization, RoleEnum, Sermon, SermonOutput, SermonStatus, User
 from app.schemas import SermonCreateIn, SermonOut, SermonUpdate
 from app.core.config import settings
 from app.services import ai_service, media_service, nlp_service, storage_service
+from app.services.billing.subscription_service import assert_can_create_sermon
 from app.services.ai_service import TranscriptionError
 from app.services.media_service import MediaProcessingError, compress_audio_for_storage
 
@@ -101,6 +102,13 @@ def create_sermon(
     current_user: User = Depends(require_role([RoleEnum.super_admin, RoleEnum.admin, RoleEnum.editor])),
 ):
     org_id = resolve_sermon_organization_id(current_user, sermon_in.organization_id)
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    try:
+        assert_can_create_sermon(db, org)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e)) from e
     payload = sermon_in.dict(exclude={"organization_id"})
     sermon = Sermon(
         **payload,
