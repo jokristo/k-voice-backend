@@ -29,6 +29,7 @@ class EntitlementsOut(BaseModel):
     sermons_limit: int
     sermons_used: int
     can_create_sermon: bool
+    has_paid_subscription: bool = False
     subscription_status: str
     payment_provider: Optional[str] = None
     external_subscription_id: Optional[str] = None

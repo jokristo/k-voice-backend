@@ -106,7 +106,7 @@ def create_sermon(
     if not org:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
     try:
-        assert_can_create_sermon(db, org)
+        assert_can_create_sermon(db, org, current_user)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e)) from e
     payload = sermon_in.dict(exclude={"organization_id"})
