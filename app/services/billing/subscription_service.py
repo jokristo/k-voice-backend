@@ -96,3 +96,57 @@ def activate_paypal_subscription(
     db.commit()
     db.refresh(org)
     return build_entitlements(db, org)
+
+
+def list_admin_subscriptions(db: Session, *, paypal_mode: str) -> dict[str, Any]:
+    orgs = db.query(Organization).order_by(Organization.name).all()
+    items: list[dict[str, Any]] = []
+    by_plan: dict[str, int] = {"free": 0, "essentiel": 0, "avance": 0}
+    mrr_usd = 0
+    paying_count = 0
+
+    for org in orgs:
+        ent = build_entitlements(db, org)
+        effective = ent["plan"]
+        stored = (org.billing_plan or "free").lower()
+        if stored not in PLAN_DEFINITIONS:
+            stored = "free"
+        by_plan[effective] = by_plan.get(effective, 0) + 1
+        is_paying = effective != "free"
+        if is_paying:
+            paying_count += 1
+            if ent.get("price_usd"):
+                mrr_usd += int(ent["price_usd"])
+
+        items.append(
+            {
+                "organization_id": org.id,
+                "organization_name": org.name,
+                "organization_slug": org.slug,
+                "organization_email": org.email,
+                "stored_plan": stored,
+                "effective_plan": effective,
+                "plan_label": ent["plan_label"],
+                "subscription_status": org.subscription_status or "none",
+                "payment_provider": org.payment_provider,
+                "external_subscription_id": org.external_subscription_id,
+                "paypal_plan_id": org.paypal_plan_id,
+                "subscription_started_at": org.subscription_started_at,
+                "price_usd": ent.get("price_usd"),
+                "sermons_used": ent["sermons_used"],
+                "sermons_limit": ent["sermons_limit"],
+                "can_create_sermon": ent["can_create_sermon"],
+                "is_paying": is_paying,
+            }
+        )
+
+    return {
+        "summary": {
+            "total_organizations": len(orgs),
+            "paying_count": paying_count,
+            "mrr_usd": mrr_usd,
+            "paypal_mode": paypal_mode,
+            "by_plan": by_plan,
+        },
+        "items": items,
+    }

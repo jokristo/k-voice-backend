@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     paypal_client_secret: str = ""
     paypal_plan_id_essentiel: str = "P-9JW052881K6990917NINPJMI"
     paypal_plan_id_avance: str = "P-75V114236B1696345NINPM6A"
+    # ID du webhook créé dans le dashboard PayPal (Apps → Webhooks)
+    paypal_webhook_id: str = ""
+    # Dev local uniquement : ne pas vérifier la signature (ngrok + simulateur)
+    paypal_webhook_skip_verify: bool = False
 
     @field_validator("database_url", mode="before")
     @classmethod

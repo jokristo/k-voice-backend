@@ -47,10 +47,12 @@ class PayPalProvider(PaymentProvider):
             raise RuntimeError("PayPal OAuth token missing")
         return token
 
-    def _request(self, method: str, path: str) -> dict[str, Any]:
+    def _request(self, method: str, path: str, *, body: dict[str, Any] | None = None) -> dict[str, Any]:
         token = self._access_token()
+        data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(
             f"{self._api_base}{path}",
+            data=data,
             headers={
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
@@ -61,9 +63,32 @@ class PayPalProvider(PaymentProvider):
             with urllib.request.urlopen(req, timeout=30) as res:
                 return json.loads(res.read().decode())
         except urllib.error.HTTPError as e:
-            body = e.read().decode() if e.fp else ""
-            logger.warning("PayPal API %s %s -> %s %s", method, path, e.code, body[:500])
+            err_body = e.read().decode() if e.fp else ""
+            logger.warning("PayPal API %s %s -> %s %s", method, path, e.code, err_body[:500])
             raise RuntimeError(f"PayPal API error ({e.code})") from e
+
+    def verify_webhook_signature(
+        self,
+        *,
+        transmission_id: str,
+        transmission_time: str,
+        transmission_sig: str,
+        cert_url: str,
+        auth_algo: str,
+        webhook_id: str,
+        webhook_event: dict[str, Any],
+    ) -> bool:
+        payload = {
+            "auth_algo": auth_algo,
+            "cert_url": cert_url,
+            "transmission_id": transmission_id,
+            "transmission_sig": transmission_sig,
+            "transmission_time": transmission_time,
+            "webhook_id": webhook_id,
+            "webhook_event": webhook_event,
+        }
+        result = self._request("POST", "/v1/notifications/verify-webhook-signature", body=payload)
+        return (result.get("verification_status") or "").upper() == "SUCCESS"
 
     def get_subscription(self, subscription_id: str) -> dict[str, Any]:
         return self._request("GET", f"/v1/billing/subscriptions/{subscription_id}")

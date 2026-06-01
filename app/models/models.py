@@ -48,6 +48,9 @@ class Organization(Base):
     phone = Column(String)
     email = Column(String)
     logo = Column(String)
+    city = Column(String(128), nullable=True)
+    country = Column(String(128), nullable=True)
+    dial_code = Column(String(8), nullable=True)
     # Billing (PayPal subscriptions)
     billing_plan = Column(String(32), nullable=True)  # essentiel, avance; null = free tier
     subscription_status = Column(String(32), nullable=False, default="none")

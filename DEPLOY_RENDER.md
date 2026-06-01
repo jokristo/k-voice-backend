@@ -78,7 +78,10 @@ PAYPAL_CLIENT_ID=<client id>
 PAYPAL_CLIENT_SECRET=<secret>
 PAYPAL_PLAN_ID_ESSENTIEL=P-9JW052881K6990917NINPJMI
 PAYPAL_PLAN_ID_AVANCE=P-75V114236B1696345NINPM6A
+PAYPAL_WEBHOOK_ID=<WH-… depuis PayPal Dashboard → Webhooks>
 ```
+
+Configurer le webhook PayPal vers `https://<kvoice-api>/billing/webhooks/paypal` (détails : **`PAYPAL_WEBHOOKS.md`**).
 
 Après deploy : `alembic upgrade head` applique la migration `0005_organization_billing`.
 

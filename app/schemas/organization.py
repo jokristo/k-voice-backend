@@ -11,6 +11,9 @@ class OrganizationBase(BaseModel):
     phone: Optional[str] = None
     email: Optional[EmailStr] = None
     logo: Optional[str] = None
+    city: Optional[str] = None
+    country: Optional[str] = None
+    dial_code: Optional[str] = None
 
 
 class OrganizationCreate(OrganizationBase):
@@ -24,6 +27,9 @@ class OrganizationUpdate(BaseModel):
     phone: Optional[str] = None
     email: Optional[EmailStr] = None
     logo: Optional[str] = None
+    city: Optional[str] = None
+    country: Optional[str] = None
+    dial_code: Optional[str] = None
 
 
 class OrganizationOut(OrganizationBase):

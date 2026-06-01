@@ -9,7 +9,9 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.deps.auth import get_current_user
 from app.models import User
-from app.schemas import LoginRequest, LoginResponse, TokenPayload, UserCreate, UserOut
+from app.schemas import LoginRequest, LoginResponse, SignupRequest, SignupResponse, TokenPayload, UserCreate, UserOut
+from app.schemas.organization import OrganizationOut
+from app.services.signup_service import signup_church_admin
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -39,6 +41,32 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
     db.refresh(user)
     logger.info("register ok user_id=%s email=%r", user.id, user.email)
     return user
+
+
+@router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
+def signup(body: SignupRequest, db: Session = Depends(get_db)):
+    try:
+        user, org = signup_church_admin(
+            db,
+            name=body.name,
+            email=body.email,
+            password=body.password,
+            church_name=body.church_name,
+            city=body.city,
+            dial_code=body.dial_code,
+            phone_local=body.phone_local,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+    access_token = security.create_access_token(user.id)
+    refresh_token = security.create_refresh_token(user.id)
+    return SignupResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=user,
+        organization=OrganizationOut.model_validate(org),
+    )
 
 
 @router.post("/login", response_model=LoginResponse)
