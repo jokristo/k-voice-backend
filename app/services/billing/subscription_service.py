@@ -3,7 +3,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models import Organization, Sermon
+from app.models import Organization, RoleEnum, Sermon, User
 from app.services.billing.plans import (
     ACTIVE_SUBSCRIPTION_STATUSES,
     PLAN_DEFINITIONS,
@@ -38,25 +38,54 @@ def count_sermons_this_month(db: Session, organization_id: str) -> int:
     )
 
 
+def has_paid_subscription(org: Organization) -> bool:
+    return effective_billing_plan(org) != "free"
+
+
 def build_entitlements(db: Session, org: Organization) -> dict[str, Any]:
+    used = count_sermons_this_month(db, org.id)
+    base = {
+        "subscription_status": org.subscription_status or "none",
+        "payment_provider": org.payment_provider,
+        "external_subscription_id": org.external_subscription_id,
+    }
+
+    if not has_paid_subscription(org):
+        return {
+            **base,
+            "plan": "none",
+            "plan_label": "Aucun abonnement actif",
+            "sermons_limit": 0,
+            "sermons_used": used,
+            "can_create_sermon": False,
+            "has_paid_subscription": False,
+            "price_usd": None,
+        }
+
     plan_key = effective_billing_plan(org)
     plan_def = PLAN_DEFINITIONS[plan_key]
-    used = count_sermons_this_month(db, org.id)
     limit = plan_def["sermons_per_month"]
     return {
+        **base,
         "plan": plan_key,
         "plan_label": plan_def["label"],
         "sermons_limit": limit,
         "sermons_used": used,
         "can_create_sermon": used < limit,
-        "subscription_status": org.subscription_status or "none",
-        "payment_provider": org.payment_provider,
-        "external_subscription_id": org.external_subscription_id,
+        "has_paid_subscription": True,
         "price_usd": plan_def["price_usd"],
     }
 
 
-def assert_can_create_sermon(db: Session, org: Organization) -> None:
+def assert_can_create_sermon(
+    db: Session, org: Organization, user: User | None = None
+) -> None:
+    if user is not None and user.role == RoleEnum.super_admin:
+        return
+    if not has_paid_subscription(org):
+        raise ValueError(
+            "Un abonnement actif (Essentiel ou Avancé) est requis pour enregistrer des prédications."
+        )
     ent = build_entitlements(db, org)
     if not ent["can_create_sermon"]:
         raise ValueError(

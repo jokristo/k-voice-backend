@@ -55,12 +55,20 @@ def update_organization(
     org_id: str,
     org_in: OrganizationUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_role([RoleEnum.super_admin])),
+    current_user: User = Depends(get_current_user),
 ):
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if not org:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
-    for field, value in org_in.dict(exclude_unset=True).items():
+    assert_org_access(current_user, org_id)
+    if not is_super_admin(current_user) and current_user.role != RoleEnum.admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    updates = org_in.dict(exclude_unset=True)
+    if not is_super_admin(current_user):
+        updates.pop("slug", None)
+
+    for field, value in updates.items():
         setattr(org, field, value)
     db.commit()
     db.refresh(org)
