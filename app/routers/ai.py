@@ -144,15 +144,18 @@ def _process_sermon_job(sermon_id: str):
             )
             try:
                 output.brochure_paragraphs = brochure_service.generate_brochure_paragraphs(source)
+                meta = dict(output.nlp_metadata) if isinstance(output.nlp_metadata, dict) else {}
+                meta.pop("brochure_error", None)
+                output.nlp_metadata = meta
                 logger.info(
                     "brochure generated sermon_id=%s paragraphs=%s",
                     sermon_id,
                     len(output.brochure_paragraphs or []),
                 )
-            except brochure_service.BrochureProcessingError as e:
-                logger.warning("brochure FAIL sermon_id=%s: %s", sermon_id, e.message)
+            except Exception as e:
+                logger.warning("brochure FAIL sermon_id=%s: %s", sermon_id, e)
                 meta = dict(output.nlp_metadata) if isinstance(output.nlp_metadata, dict) else {}
-                meta["brochure_error"] = e.message[:500]
+                meta["brochure_error"] = str(e)[:500]
                 output.nlp_metadata = meta
 
         sermon.processed_at = datetime.utcnow()
