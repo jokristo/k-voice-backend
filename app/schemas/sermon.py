@@ -19,6 +19,7 @@ class SermonOutputBase(BaseModel):
     processing_time: Optional[int] = None
     ai_model: Optional[str] = None
     nlp_metadata: Optional[Any] = None
+    brochure_paragraphs: Optional[Any] = None
 
 
 class SermonOutputCreate(SermonOutputBase):

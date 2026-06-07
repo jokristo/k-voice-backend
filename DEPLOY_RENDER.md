@@ -34,7 +34,7 @@ La base **n’est plus** sur le disque local : seuls les fichiers audio utilisen
    - le service **kvoice-api** avec `DATABASE_URL` liée à la base
 4. Renseigner les secrets (`sync: false`) :
    - `OPENAI_API_KEY`
-   - `CORS_ORIGINS` → `https://votre-frontend.onrender.com`
+   - `CORS_ORIGINS` → `https://k-voice-frontend.onrender.com`
    - `SUPER_ADMIN_EMAIL` / `SUPER_ADMIN_PASSWORD` (si `RUN_BOOTSTRAP=true`)
 5. Premier deploy → vérifier les logs : migrations + bootstrap super-admin.
 6. Mettre **`RUN_BOOTSTRAP=false`** après création du compte.
@@ -51,7 +51,7 @@ La base **n’est plus** sur le disque local : seuls les fichiers audio utilisen
    OPENAI_API_KEY=...
    TRANSCRIPTION_PROVIDER=openai
    NLP_PROVIDER=openai
-   CORS_ORIGINS=https://votre-frontend.onrender.com
+   CORS_ORIGINS=https://k-voice-frontend.onrender.com
    RUN_BOOTSTRAP=true
    SUPER_ADMIN_EMAIL=...
    SUPER_ADMIN_PASSWORD=...
@@ -70,14 +70,15 @@ SECRET_KEY=<généré>
 OPENAI_API_KEY=...
 TRANSCRIPTION_PROVIDER=openai
 NLP_PROVIDER=openai
-CORS_ORIGINS=https://votre-frontend.onrender.com
+CORS_ORIGINS=https://k-voice-frontend.onrender.com
 
 # Abonnements PayPal (router /billing)
 PAYPAL_MODE=sandbox
 PAYPAL_CLIENT_ID=<client id>
 PAYPAL_CLIENT_SECRET=<secret>
-PAYPAL_PLAN_ID_ESSENTIEL=P-9JW052881K6990917NINPJMI
-PAYPAL_PLAN_ID_AVANCE=P-75V114236B1696345NINPM6A
+PAYPAL_PLAN_ID_ESSENTIEL=P-…
+PAYPAL_PLAN_ID_STANDARD=P-…
+PAYPAL_PLAN_ID_AVANCE=P-…
 PAYPAL_WEBHOOK_ID=<WH-… depuis PayPal Dashboard → Webhooks>
 ```
 
@@ -107,7 +108,7 @@ curl https://kvoice-api.onrender.com/health
 
 ```env
 NEXT_PUBLIC_API_URL=https://kvoice-api.onrender.com
-NEXTAUTH_URL=https://ecclesiato.onrender.com
+NEXTAUTH_URL=https://k-voice-frontend.onrender.com
 NEXTAUTH_SECRET=<généré>
 NEXT_PUBLIC_PAYPAL_CLIENT_ID=<même client id public PayPal>
 ```

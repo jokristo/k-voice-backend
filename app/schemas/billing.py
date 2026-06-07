@@ -5,11 +5,12 @@ from pydantic import BaseModel, Field
 
 
 class BillingPlanPublic(BaseModel):
-    key: Literal["essentiel", "avance"]
+    key: Literal["essentiel", "standard", "avance"]
     label: str
     price_usd: int
     sermons_per_month: int
     paypal_plan_id: str
+    brochures_enabled: bool = False
 
 
 class BillingConfigOut(BaseModel):
@@ -20,7 +21,7 @@ class BillingConfigOut(BaseModel):
 
 class ActivateSubscriptionIn(BaseModel):
     subscription_id: str = Field(..., min_length=3)
-    plan: Optional[Literal["essentiel", "avance"]] = None
+    plan: Optional[Literal["essentiel", "standard", "avance"]] = None
 
 
 class EntitlementsOut(BaseModel):
@@ -30,6 +31,7 @@ class EntitlementsOut(BaseModel):
     sermons_used: int
     can_create_sermon: bool
     has_paid_subscription: bool = False
+    brochures_enabled: bool = False
     subscription_status: str
     payment_provider: Optional[str] = None
     external_subscription_id: Optional[str] = None

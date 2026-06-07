@@ -125,6 +125,7 @@ class SermonOutput(Base):
     processing_time = Column(Integer)
     ai_model = Column(String, default="whisper-v3")
     nlp_metadata = Column(JSON, nullable=True)
+    brochure_paragraphs = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

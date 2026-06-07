@@ -22,8 +22,11 @@ class PayPalProvider(PaymentProvider):
         )
         self._plan_map = {
             settings.paypal_plan_id_essentiel: "essentiel",
+            settings.paypal_plan_id_standard: "standard",
             settings.paypal_plan_id_avance: "avance",
         }
+        # Ignore empty plan IDs (not configured yet)
+        self._plan_map = {k: v for k, v in self._plan_map.items() if k}
 
     def _access_token(self) -> str:
         if not settings.paypal_client_id or not settings.paypal_client_secret:
