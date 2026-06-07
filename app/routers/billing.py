@@ -15,6 +15,7 @@ from app.schemas.billing import (
     BillingPlanPublic,
     EntitlementsOut,
 )
+from app.services.billing.plans import PLAN_DEFINITIONS
 from app.services.billing.providers.paypal import get_paypal_provider
 from app.services.billing.subscription_service import (
     activate_paypal_subscription,
@@ -38,23 +39,39 @@ def _org_for_user(db: Session, user: User) -> Organization:
 def billing_config():
     plans: list[BillingPlanPublic] = []
     if settings.paypal_plan_id_essentiel:
+        d = PLAN_DEFINITIONS["essentiel"]
         plans.append(
             BillingPlanPublic(
                 key="essentiel",
-                label="Essentiel",
-                price_usd=25,
-                sermons_per_month=4,
+                label=d["label"],
+                price_usd=d["price_usd"] or 25,
+                sermons_per_month=d["sermons_per_month"],
                 paypal_plan_id=settings.paypal_plan_id_essentiel,
+                brochures_enabled=d["brochures_enabled"],
+            )
+        )
+    if settings.paypal_plan_id_standard:
+        d = PLAN_DEFINITIONS["standard"]
+        plans.append(
+            BillingPlanPublic(
+                key="standard",
+                label=d["label"],
+                price_usd=d["price_usd"] or 35,
+                sermons_per_month=d["sermons_per_month"],
+                paypal_plan_id=settings.paypal_plan_id_standard,
+                brochures_enabled=d["brochures_enabled"],
             )
         )
     if settings.paypal_plan_id_avance:
+        d = PLAN_DEFINITIONS["avance"]
         plans.append(
             BillingPlanPublic(
                 key="avance",
-                label="Avancé",
-                price_usd=55,
-                sermons_per_month=8,
+                label=d["label"],
+                price_usd=d["price_usd"] or 55,
+                sermons_per_month=d["sermons_per_month"],
                 paypal_plan_id=settings.paypal_plan_id_avance,
+                brochures_enabled=d["brochures_enabled"],
             )
         )
     return BillingConfigOut(

@@ -8,6 +8,7 @@ from app.services.billing.plans import (
     ACTIVE_SUBSCRIPTION_STATUSES,
     PLAN_DEFINITIONS,
     BillingPlanKey,
+    plan_has_brochures,
 )
 from app.services.billing.providers.paypal import PayPalProvider, get_paypal_provider
 
@@ -60,6 +61,7 @@ def build_entitlements(db: Session, org: Organization) -> dict[str, Any]:
             "can_create_sermon": False,
             "has_paid_subscription": False,
             "price_usd": None,
+            "brochures_enabled": False,
         }
 
     plan_key = effective_billing_plan(org)
@@ -74,6 +76,7 @@ def build_entitlements(db: Session, org: Organization) -> dict[str, Any]:
         "can_create_sermon": used < limit,
         "has_paid_subscription": True,
         "price_usd": plan_def["price_usd"],
+        "brochures_enabled": plan_has_brochures(plan_key),
     }
 
 
@@ -84,7 +87,7 @@ def assert_can_create_sermon(
         return
     if not has_paid_subscription(org):
         raise ValueError(
-            "Un abonnement actif (Essentiel ou Avancé) est requis pour enregistrer des prédications."
+            "Un abonnement actif (Essentiel, Standard ou Avancé) est requis pour enregistrer des prédications."
         )
     ent = build_entitlements(db, org)
     if not ent["can_create_sermon"]:
@@ -130,7 +133,7 @@ def activate_paypal_subscription(
 def list_admin_subscriptions(db: Session, *, paypal_mode: str) -> dict[str, Any]:
     orgs = db.query(Organization).order_by(Organization.name).all()
     items: list[dict[str, Any]] = []
-    by_plan: dict[str, int] = {"free": 0, "essentiel": 0, "avance": 0}
+    by_plan: dict[str, int] = {"free": 0, "essentiel": 0, "standard": 0, "avance": 0}
     mrr_usd = 0
     paying_count = 0
 

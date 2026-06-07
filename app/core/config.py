@@ -93,6 +93,7 @@ class Settings(BaseSettings):
     paypal_client_id: str = ""
     paypal_client_secret: str = ""
     paypal_plan_id_essentiel: str = "P-9JW052881K6990917NINPJMI"
+    paypal_plan_id_standard: str = ""
     paypal_plan_id_avance: str = "P-75V114236B1696345NINPM6A"
     # ID du webhook créé dans le dashboard PayPal (Apps → Webhooks)
     paypal_webhook_id: str = ""

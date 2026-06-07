@@ -10,8 +10,10 @@ from sqlalchemy.orm import Session
 from app.core.database import SessionLocal, get_db
 from app.deps.auth import get_current_user, require_role
 from app.deps.scopes import assert_org_access
-from app.models import RoleEnum, Sermon, SermonOutput, SermonStatus, User
-from app.services import ai_service, nlp_service, storage_service
+from app.models import Organization, RoleEnum, Sermon, SermonOutput, SermonStatus, User
+from app.services import ai_service, brochure_service, nlp_service, storage_service
+from app.services.billing.plans import plan_has_brochures
+from app.services.billing.subscription_service import effective_billing_plan
 from app.services.ai_service import TranscriptionError
 from app.services.nlp_service import NLPProcessingError
 
@@ -127,6 +129,32 @@ def _process_sermon_job(sermon_id: str):
             else:
                 setattr(output, field, value)
         output.processing_time = int((time.time() - start) * 1000)
+
+        org = db.query(Organization).filter(Organization.id == sermon.organization_id).first()
+        recorder = db.query(User).filter(User.id == sermon.recorded_by_id).first()
+        plan_key = effective_billing_plan(org) if org else "free"
+        wants_brochure = plan_has_brochures(plan_key) or (
+            recorder is not None and recorder.role == RoleEnum.super_admin
+        )
+        if wants_brochure:
+            meta = output.nlp_metadata if isinstance(output.nlp_metadata, dict) else {}
+            source = brochure_service.best_transcript_for_brochure(
+                output.transcript or "",
+                meta,
+            )
+            try:
+                output.brochure_paragraphs = brochure_service.generate_brochure_paragraphs(source)
+                logger.info(
+                    "brochure generated sermon_id=%s paragraphs=%s",
+                    sermon_id,
+                    len(output.brochure_paragraphs or []),
+                )
+            except brochure_service.BrochureProcessingError as e:
+                logger.warning("brochure FAIL sermon_id=%s: %s", sermon_id, e.message)
+                meta = dict(output.nlp_metadata) if isinstance(output.nlp_metadata, dict) else {}
+                meta["brochure_error"] = e.message[:500]
+                output.nlp_metadata = meta
+
         sermon.processed_at = datetime.utcnow()
         sermon.status = SermonStatus.completed
         sermon.output = output
