@@ -24,6 +24,7 @@ Règles :
 4. Corrige légèrement la ponctuation si nécessaire, sans changer le sens.
 5. Le français et le lingala du prédicateur sont conservés.
 6. Pas de titres, pas de commentaires éditoriaux.
+7. Échappe correctement les guillemets et retours à la ligne dans les chaînes JSON (\\n, \\").
 
 Réponds UNIQUEMENT en JSON valide."""
 
@@ -35,6 +36,7 @@ BROCHURE_JSON_HINT = """{
 }"""
 
 SECTION_CHARS = 14_000
+BROCHURE_JSON_MAX_ATTEMPTS = 3
 
 
 class BrochureProcessingError(Exception):
@@ -62,25 +64,59 @@ def _split_sections(text: str, max_chars: int = SECTION_CHARS) -> list[str]:
     return [p for p in parts if p]
 
 
+def _extract_json_object(raw: str) -> str | None:
+    s = raw.strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```(?:json)?\s*", "", s)
+        s = re.sub(r"\s*```$", "", s)
+    start = s.find("{")
+    end = s.rfind("}")
+    if start >= 0 and end > start:
+        return s[start : end + 1]
+    return None
+
+
+def _repair_json(raw: str) -> str:
+    """Correctifs légers pour JSON quasi-valide (virgules traînantes, etc.)."""
+    s = raw.strip()
+    s = re.sub(r",\s*([}\]])", r"\1", s)
+    return s
+
+
 def _parse_paragraphs(raw: str) -> list[dict[str, Any]]:
-    data = json.loads(raw)
-    rows = data.get("paragraphs") if isinstance(data, dict) else None
-    if not isinstance(rows, list):
-        raise BrochureProcessingError("Format brochure invalide (paragraphs manquant)")
-    out: list[dict[str, Any]] = []
-    for i, row in enumerate(rows):
-        if not isinstance(row, dict):
-            continue
-        text = (row.get("text") or "").strip()
-        if not text:
-            continue
-        num = row.get("number")
-        if not isinstance(num, int) or num < 1:
-            num = i + 1
-        out.append({"number": num, "text": text})
-    if not out:
-        raise BrochureProcessingError("Aucun paragraphe généré")
-    return out
+    candidates: list[str] = []
+    stripped = raw.strip()
+    if stripped:
+        candidates.append(stripped)
+    extracted = _extract_json_object(stripped)
+    if extracted and extracted not in candidates:
+        candidates.append(extracted)
+    for candidate in candidates:
+        for attempt_text in (candidate, _repair_json(candidate)):
+            if not attempt_text:
+                continue
+            try:
+                data = json.loads(attempt_text)
+            except json.JSONDecodeError:
+                continue
+            rows = data.get("paragraphs") if isinstance(data, dict) else None
+            if not isinstance(rows, list):
+                raise BrochureProcessingError("Format brochure invalide (paragraphs manquant)")
+            out: list[dict[str, Any]] = []
+            for i, row in enumerate(rows):
+                if not isinstance(row, dict):
+                    continue
+                text = (row.get("text") or "").strip()
+                if not text:
+                    continue
+                num = row.get("number")
+                if not isinstance(num, int) or num < 1:
+                    num = i + 1
+                out.append({"number": num, "text": text})
+            if not out:
+                raise BrochureProcessingError("Aucun paragraphe généré")
+            return out
+    raise BrochureProcessingError("JSON brochure invalide : réponse illisible ou tronquée")
 
 
 def _openai_client() -> OpenAI:
@@ -89,27 +125,8 @@ def _openai_client() -> OpenAI:
     return OpenAI(
         api_key=settings.openai_api_key,
         timeout=max(120.0, float(settings.openai_nlp_timeout_s)),
+        max_retries=2,
     )
-
-
-def _call_brochure_section(client: OpenAI, section: str, *, start_number: int) -> list[dict[str, Any]]:
-    user = (
-        f"Numérote les paragraphes à partir de {start_number} pour cette section du discours.\n\n"
-        f"Format attendu :\n{BROCHURE_JSON_HINT}\n\n"
-        f"Texte :\n{section}"
-    )
-    resp = client.chat.completions.create(
-        model=settings.openai_summary_model,
-        messages=[
-            {"role": "system", "content": BROCHURE_SYSTEM},
-            {"role": "user", "content": user},
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.2,
-        max_tokens=min(8192, settings.openai_nlp_summarize_max_tokens),
-    )
-    content = (resp.choices[0].message.content or "").strip()
-    return _parse_paragraphs(content)
 
 
 def _stub_paragraphs(text: str) -> list[dict[str, Any]]:
@@ -128,6 +145,71 @@ def _stub_paragraphs(text: str) -> list[dict[str, Any]]:
     return [{"number": i + 1, "text": b} for i, b in enumerate(blocks) if b]
 
 
+def _call_brochure_section(client: OpenAI, section: str, *, start_number: int) -> list[dict[str, Any]]:
+    user = (
+        f"Numérote les paragraphes à partir de {start_number} pour cette section du discours.\n\n"
+        f"Format attendu :\n{BROCHURE_JSON_HINT}\n\n"
+        f"Texte :\n{section}"
+    )
+    last_error: BrochureProcessingError | None = None
+
+    for attempt in range(1, BROCHURE_JSON_MAX_ATTEMPTS + 1):
+        try:
+            resp = client.chat.completions.create(
+                model=settings.openai_summary_model,
+                messages=[
+                    {"role": "system", "content": BROCHURE_SYSTEM},
+                    {"role": "user", "content": user},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.15,
+                max_tokens=min(8192, settings.openai_nlp_summarize_max_tokens),
+            )
+        except (APIConnectionError, APITimeoutError, RateLimitError, APIStatusError) as e:
+            raise BrochureProcessingError(f"Erreur OpenAI brochure: {e}") from e
+
+        choice = resp.choices[0]
+        content = (choice.message.content or "").strip()
+        finish = getattr(choice, "finish_reason", None)
+
+        if not content:
+            last_error = BrochureProcessingError("Réponse OpenAI brochure vide")
+            logger.warning(
+                "brochure section parse attempt=%s empty response start_number=%s",
+                attempt,
+                start_number,
+            )
+            continue
+
+        if finish == "length":
+            logger.warning(
+                "brochure section truncated finish_reason=length len=%s start_number=%s",
+                len(content),
+                start_number,
+            )
+            last_error = BrochureProcessingError("Réponse brochure tronquée (tokens)")
+            continue
+
+        try:
+            return _parse_paragraphs(content)
+        except BrochureProcessingError as e:
+            last_error = e
+            logger.warning(
+                "brochure section parse attempt=%s failed start_number=%s: %s preview=%r",
+                attempt,
+                start_number,
+                e.message,
+                content[:120],
+            )
+
+    logger.warning(
+        "brochure section stub fallback start_number=%s reason=%s",
+        start_number,
+        last_error.message if last_error else "unknown",
+    )
+    return _stub_paragraphs(section)
+
+
 def generate_brochure_paragraphs(transcript: str) -> list[dict[str, Any]]:
     """Return [{number, text}, ...] for storage in sermon_outputs.brochure_paragraphs."""
     if not transcript or not transcript.strip():
@@ -143,14 +225,14 @@ def generate_brochure_paragraphs(transcript: str) -> list[dict[str, Any]]:
     merged: list[dict[str, Any]] = []
     next_num = 1
     for idx, section in enumerate(sections):
-        try:
-            rows = _call_brochure_section(client, section, start_number=next_num)
-        except (APIConnectionError, APITimeoutError, RateLimitError, APIStatusError) as e:
-            raise BrochureProcessingError(f"Erreur OpenAI brochure: {e}") from e
+        rows = _call_brochure_section(client, section, start_number=next_num)
         for row in rows:
             merged.append({"number": next_num, "text": row["text"]})
             next_num += 1
         logger.info("brochure section=%s paragraphs=%s total=%s", idx + 1, len(rows), len(merged))
+
+    if not merged:
+        return _stub_paragraphs(transcript)
     return merged
 
 
